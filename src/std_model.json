@@ -1,0 +1,79 @@
+{
+  "globals": {
+    "MsgBox": { "type": "Function", "returns": "Integer" },
+    "InputBox": { "type": "Function", "returns": "String" },
+    "Debug": { "type": "Debug" },
+    "Err": { "type": "ErrObject" },
+    "Application": { "type": "Application" },
+    "ActiveSheet": { "type": "Worksheet" },
+    "ActiveWorkbook": { "type": "Workbook" },
+    "Worksheets": { "type": "Sheets" },
+    "True": { "type": "Boolean" },
+    "False": { "type": "Boolean" },
+    "Nothing": { "type": "Object" },
+    "Empty": { "type": "Variant" },
+    "Null": { "type": "Variant" },
+    "Me": { "type": "Object" }
+  },
+  "classes": {
+    "Debug": {
+      "members": {
+        "Print": { "type": "Sub" },
+        "Assert": { "type": "Sub" }
+      }
+    },
+    "ErrObject": {
+      "members": {
+        "Clear": {"type":"Sub"}, 
+        "Raise": {"type":"Sub"}, 
+        "Number": {"type":"Long"}, 
+        "Description": {"type":"String"}, 
+        "Source": {"type":"String"}
+      }
+    },
+    "Collection": {
+      "members": {
+        "Add": { "type": "Sub" },
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Variant" },
+        "Remove": { "type": "Sub" }
+      }
+    },
+    "Worksheet": {
+      "members": {
+        "Range": { "type": "Range" },
+        "Cells": { "type": "Range" },
+        "Name": { "type": "String" },
+        "Visible": { "type": "Boolean" }
+      }
+    },
+    "Workbook": {
+      "members": {
+        "Worksheets": { "type": "Sheets" },
+        "Name": { "type": "String" },
+        "Save": { "type": "Sub" }
+      }
+    },
+    "Sheets": {
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Object" }
+      }
+    },
+    "Range": {
+      "members": {
+        "Value": { "type": "Variant" },
+        "Address": { "type": "String" },
+        "Interior": { "type": "Interior" },
+        "Font": { "type": "Font" }
+      }
+    },
+    "CommandButton": {
+      "members": {
+        "Caption": { "type": "String" },
+        "Enabled": { "type": "Boolean" },
+        "Value": { "type": "Boolean" }
+      }
+    }
+  }
+}

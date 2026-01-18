@@ -1,0 +1,13 @@
+{
+  "summary": {
+    "files_scanned": 1,
+    "issues_found": 1
+  },
+  "issues": [
+    {
+      "file": "ConstTest.bas",
+      "line": 9,
+      "message": "Undefined identifier 'UndefinedVarIfTrue' in 'TestLog'."
+    }
+  ]
+}
