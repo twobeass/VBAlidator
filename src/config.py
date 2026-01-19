@@ -62,6 +62,17 @@ class Config:
                     else:
                         self.object_model["classes"][cls_name] = cls_def
                         
+            # Merge References
+            if "references" in data:
+                if "references" not in self.object_model:
+                     self.object_model["references"] = []
+                # Append new references (avoid duplicates based on name?)
+                existing_names = {r["name"] for r in self.object_model["references"]}
+                for ref in data["references"]:
+                    if ref["name"] not in existing_names:
+                        self.object_model["references"].append(ref)
+                        existing_names.add(ref["name"])
+                        
         except Exception as e:
             print(f"Error loading model {filepath}: {e}")
 
