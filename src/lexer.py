@@ -27,9 +27,9 @@ class Lexer:
             ('FLOAT', r'\d+\.\d+'),
             ('INTEGER', r'\d+'),
             ('LINE_CONTINUATION', r' _(\r\n|\n)'), # Handle line continuation
-            ('NEWLINE', r'(\r\n|\n|:)'), # Colon is also a statement separator
+            ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
-            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,]'),
+            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:]'), # Added : to operator
             ('IDENTIFIER', r'[a-zA-Z_]\w*'), 
             ('MISMATCH', r'.'),
         ]

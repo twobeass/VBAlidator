@@ -54,3 +54,16 @@ Once you have `vba_model.json`, pass it to the simulator:
 ```bash
 python3 -m src.main ./my_code --model ./vba_model.json
 ```
+
+## Code-Level Heuristics
+
+In addition to the JSON model, the analyzer implements several **heuristics** in `src/analyzer.py` to handle dynamic or common VBA patterns without requiring explicit definitions:
+
+1.  **Prefix-Based Resolution**: Identifiers starting with specific prefixes are automatically resolved to a type.
+    *   `txt*`, `lbl*`, `btn*`... -> `Control` (Useful for Forms)
+    *   `vb*`, `mso*`, `ad*` -> `Long` (Intrinsic Constants)
+    *   `vis*` -> `Long` (Visio Constants, excluding `Visio` the object)
+
+2.  **Common Member Resolution**: A list of common identifiers (e.g., `Name`, `Count`, `Item`, `Add`, `Close`) are resolved to `Variant` if not found in the explicit model. This acts as a catch-all to prevent "Member not found" errors for dynamic objects.
+
+3.  **Implicit Globals**: The analyzer automatically registers `Visio` as a global `Application` object and creates implicit global instances for Forms and Classes with `VB_PredeclaredId = True`.

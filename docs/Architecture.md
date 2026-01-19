@@ -25,18 +25,20 @@ The **VBA Compile Simulator** is built as a modular static analysis pipeline usi
     *   **VBAParser:** Parses the actual code logic.
 *   **Key Structures:**
     *   `ModuleNode`: Represents a file (Module, Class, Form).
-    *   `ProcedureNode`: Represents a Sub, Function, or Property.
+    *   `ProcedureNode`: Represents a Sub, Function, Property, or **Declare** statement.
+    *   `TypeNode`: Represents a **User Defined Type (UDT)** definition (`Type...End Type`).
     *   `StatementNode`: Represents a single line of code.
     *   `WithNode`: Represents a `With...End With` block (recursive).
 
 ### 4. Analyzer (`src/analyzer.py`)
 *   **Responsibility:** Performs semantic analysis on the parsed nodes.
 *   **Process:**
-    *   **Pass 1 (Discovery):** Scans all modules to register global variables, public procedures, and class names into the Global Symbol Table.
+    *   **Pass 1 (Discovery):** Scans all modules to register global variables, public procedures, class names, **UDTs**, and **Declare** statements into the Global Symbol Table.
     *   **Pass 2 (Resolution):** Walks through procedure bodies to verify logic.
         *   Creates local scopes for arguments and `Dim` variables.
         *   Maintains a `With Stack` to resolve dot-notation (`.Value`) against the current `With` object context.
         *   Validates member access against the loaded Object Model.
+        *   **Heuristics:** Uses prefix-based (e.g., `txt*` -> `Control`) and name-based (e.g., `CellsU` -> `Variant`) heuristics to reduce false positives for dynamic objects.
 
 ### 5. Configuration (`src/config.py`)
 *   **Responsibility:** Manages the Object Model definitions.

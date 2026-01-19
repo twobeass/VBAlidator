@@ -26,17 +26,30 @@ class WithNode(Node):
         return f"With(expr, {len(self.body)} stmts)"
 
 class ProcedureNode(Node):
-    def __init__(self, name, proc_type, return_type='Variant', scope='Public'):
+    def __init__(self, name, proc_type, return_type='Variant', scope='Public', is_declare=False, lib_name=None, alias_name=None):
         self.name = name
         self.proc_type = proc_type # Sub, Function, Property Get/Set/Let
         self.return_type = return_type
         self.scope = scope
+        self.is_declare = is_declare
+        self.lib_name = lib_name
+        self.alias_name = alias_name
         self.args = [] # List of VariableNode
         self.locals = [] # List of VariableNode
         self.body = [] # List of nodes (StatementNode, WithNode)
 
     def __repr__(self):
-        return f"{self.proc_type} {self.name}() As {self.return_type}"
+        decl = "Declare " if self.is_declare else ""
+        return f"{decl}{self.proc_type} {self.name}() As {self.return_type}"
+
+class TypeNode(Node):
+    def __init__(self, name, scope='Public'):
+        self.name = name
+        self.scope = scope
+        self.members = [] # List of VariableNode
+
+    def __repr__(self):
+        return f"Type {self.name} ({len(self.members)} members)"
 
 class ModuleNode(Node):
     def __init__(self, filename, module_type='Module'):
@@ -128,19 +141,96 @@ class VBAParser:
 
     def parse_attribute(self, module):
         self.consume('IDENTIFIER', 'Attribute')
-        self.consume('IDENTIFIER', 'VB_Name')
-        self.consume('OPERATOR', '=')
-        if self.current_token.type == 'STRING':
-            module.name = self.current_token.value.strip('"')
+        
+        attr_name = "Unknown"
+        if self.current_token.type == 'IDENTIFIER':
+            attr_name = self.current_token.value
             self.advance()
+            
+        self.consume('OPERATOR', '=')
+        
+        attr_value = "Unknown"
+        if self.current_token.type == 'STRING':
+            attr_value = self.current_token.value.strip('"')
+            self.advance()
+        elif self.current_token.type == 'IDENTIFIER': # True/False
+            attr_value = self.current_token.value
+            self.advance()
+        
+        module.attributes[attr_name] = attr_value
+        
+        if attr_name == 'VB_Name':
+            module.name = attr_value
+            
         self.consume_statement()
 
     def parse_declaration(self, module):
         scope = self.current_token.value # Public, Private, Dim
         self.advance()
         
+        # Handle Declare
+        # [Public|Private] Declare [PtrSafe] Sub/Function ...
+        if self.match('IDENTIFIER', 'Declare'):
+            self.advance() # consume Declare
+            
+            # Optional PtrSafe
+            is_ptrsafe = False
+            if self.match('IDENTIFIER', 'PtrSafe'):
+                self.advance()
+                is_ptrsafe = True
+            
+            proc_type = "Sub"
+            if self.match('IDENTIFIER', 'Function'):
+                proc_type = "Function"
+                self.advance()
+            elif self.match('IDENTIFIER', 'Sub'):
+                self.advance()
+            
+            proc_name = "Unknown"
+            if self.current_token.type == 'IDENTIFIER':
+                proc_name = self.current_token.value
+                self.advance()
+            
+            # Lib "..."
+            lib_name = None
+            if self.match('IDENTIFIER', 'Lib'):
+                self.advance()
+                if self.current_token.type == 'STRING':
+                    lib_name = self.current_token.value
+                    self.advance()
+            
+            # Alias "..."
+            alias_name = None
+            if self.match('IDENTIFIER', 'Alias'):
+                self.advance()
+                if self.current_token.type == 'STRING':
+                    alias_name = self.current_token.value
+                    self.advance()
+            
+            proc = ProcedureNode(proc_name, proc_type, scope=scope, is_declare=True, lib_name=lib_name, alias_name=alias_name)
+            
+            # Args (...)
+            if self.match('OPERATOR', '('):
+                self.parse_arg_list(proc)
+            
+            # Return type
+            if self.match('IDENTIFIER', 'As'):
+                self.advance()
+                proc.return_type = self.parse_type_signature()
+                
+            self.consume_statement()
+            module.procedures.append(proc)
+            return
+
         if self.match('IDENTIFIER', 'Sub') or self.match('IDENTIFIER', 'Function') or self.match('IDENTIFIER', 'Property'):
             self.procedures_parse(module, scope)
+            return
+
+        # Handle 'Type' (Public Type ...)
+        if self.match('IDENTIFIER', 'Type'):
+            # Delegate to parse_udt but fix scope?
+            # parse_udt consumes 'Type'.
+            self.parse_udt(module, scope=scope)
             return
 
         # Check if Const
@@ -148,6 +238,10 @@ class VBAParser:
              if self.match('IDENTIFIER', 'Const'):
                  self.advance()
         
+        # Check if WithEvents
+        if self.match('IDENTIFIER', 'WithEvents'):
+            self.advance()
+
         # Dim x As Type
         while True:
             if self.current_token.type == 'IDENTIFIER':
@@ -214,31 +308,7 @@ class VBAParser:
         
         # Args
         if self.match('OPERATOR', '('):
-            self.advance()
-            while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
-                while self.match('IDENTIFIER', 'Optional') or self.match('IDENTIFIER', 'ByVal') or self.match('IDENTIFIER', 'ByRef') or self.match('IDENTIFIER', 'ParamArray'):
-                    self.advance()
-                
-                if self.current_token.type == 'IDENTIFIER':
-                    arg_name = self.current_token.value
-                    self.advance()
-                    arg_type = 'Variant'
-                    if self.match('IDENTIFIER', 'As'):
-                        self.advance()
-                        arg_type = self.parse_type_signature()
-                    
-                    if self.match('OPERATOR', '('):
-                         self.advance()
-                         self.consume('OPERATOR', ')')
-                         arg_type += "()"
-                         
-                    proc.args.append(VariableNode(arg_name, arg_type, 'Local'))
-                
-                if self.match('OPERATOR', ','):
-                    self.advance()
-                elif self.current_token.type != 'EOF' and not self.match('OPERATOR', ')'):
-                     self.advance()
-            self.consume('OPERATOR', ')')
+            self.parse_arg_list(proc)
             
         if self.match('IDENTIFIER', 'As'):
             self.advance()
@@ -356,23 +426,92 @@ class VBAParser:
     def collect_statement(self):
         tokens = []
         while self.current_token.type != 'NEWLINE' and self.current_token.type != 'EOF':
-             # Check for "End" keywords that might terminate block unexpectedly (error case) or correctly?
-             # No, parse_block check handles stopping condition.
              tokens.append(self.current_token)
+             
+             # Check for statement separator ':'
+             if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                 self.advance()
+                 # Break statement here, but include the colon so analyzer can detect labels "Label:"
+                 return tokens
+
              self.advance()
         if self.current_token.type == 'NEWLINE':
             self.advance()
         return tokens
 
-    def parse_udt(self, module):
+    def parse_arg_list(self, proc):
+        self.consume('OPERATOR', '(')
+        while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
+            while self.match('IDENTIFIER', 'Optional') or self.match('IDENTIFIER', 'ByVal') or self.match('IDENTIFIER', 'ByRef') or self.match('IDENTIFIER', 'ParamArray'):
+                self.advance()
+            
+            if self.current_token.type == 'IDENTIFIER':
+                arg_name = self.current_token.value
+                self.advance()
+                arg_type = 'Variant'
+                if self.match('IDENTIFIER', 'As'):
+                    self.advance()
+                    arg_type = self.parse_type_signature()
+                
+                if self.match('OPERATOR', '('):
+                        self.advance()
+                        self.consume('OPERATOR', ')')
+                        arg_type += "()"
+                        
+                proc.args.append(VariableNode(arg_name, arg_type, 'Local'))
+            
+            if self.match('OPERATOR', ','):
+                self.advance()
+            elif self.current_token.type != 'EOF' and not self.match('OPERATOR', ')'):
+                    self.advance()
+        self.consume('OPERATOR', ')')
+
+    def parse_udt(self, module, scope='Public'):
+        # NOTE: Caller (parse_module) consumes 'Type' BEFORE calling this? No.
+        # "elif self.match('IDENTIFIER', 'Type'): self.parse_udt(module)"
+        # But wait, inside parse_module, it checks current_token 'Type'.
+        # Inside parse_declaration, it checks current_token 'Type'.
+        # self.consume('IDENTIFIER', 'Type') needs to succeed.
+        
         self.consume('IDENTIFIER', 'Type')
         type_name = self.current_token.value
         self.advance()
         self.consume_statement()
+        
+        udt = TypeNode(type_name, scope)
+        
         while self.current_token.type != 'EOF':
+            # Check for End Type
             if self.match('IDENTIFIER', 'End') and self.peek().value.lower() == 'type':
-                self.advance()
-                self.advance()
+                self.advance() # End
+                self.advance() # Type
                 self.consume_statement()
                 break
+            
+            # Parse Member: Name As Type
+            if self.current_token.type == 'IDENTIFIER':
+                var_name = self.current_token.value
+                self.advance()
+                
+                var_type = 'Variant'
+                if self.match('IDENTIFIER', 'As'):
+                    self.advance()
+                    var_type = self.parse_type_signature()
+                
+                # Check for array
+                if self.match('OPERATOR', '('):
+                    while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
+                        self.advance()
+                    self.consume('OPERATOR', ')')
+                    var_type += "()"
+                
+                # Check for * N (Fixed length string) - simplified ignore
+                if self.match('OPERATOR', '*'):
+                    self.advance()
+                    self.advance() # length
+                
+                udt.members.append(VariableNode(var_name, var_type, 'Public'))
+            
             self.consume_statement()
+            
+        module.types[type_name] = udt
