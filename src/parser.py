@@ -134,7 +134,9 @@ class VBAParser:
         return module
 
     def consume_statement(self):
-        while self.current_token.type != 'NEWLINE' and self.current_token.type != 'EOF':
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                 break
             self.advance()
         if self.current_token.type == 'NEWLINE':
             self.advance()

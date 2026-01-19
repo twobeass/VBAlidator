@@ -1,6 +1,6 @@
 # Architecture Overview
 
-The **VBA Compile Simulator** is built as a modular static analysis pipeline using Python. It avoids regex-only parsing in favor of a proper tokenization and parsing strategy to handle nested scopes and complex VBA syntax.
+**VBAlidator** is built as a modular static analysis pipeline using Python. It avoids regex-only parsing in favor of a proper tokenization and parsing strategy to handle nested scopes and complex VBA syntax.
 
 ## Core Components
 
@@ -8,50 +8,39 @@ The **VBA Compile Simulator** is built as a modular static analysis pipeline usi
 *   **Responsibility:** Converts raw VBA source code into a stream of `Token` objects.
 *   **Features:**
     *   Handles comments, strings, identifiers, and literals.
-    *   Recognizes line continuations (` _`).
+    *   Recognizes line continuations (` _`) and statement separators (`:`).
     *   Identifies Preprocessor directives (`#If`, `#Const`, `#End`).
 
 ### 2. Preprocessor (`src/preprocessor.py`)
 *   **Responsibility:** Filters the token stream based on conditional compilation logic.
-*   **Logic:**
-    *   Maintains a stack of active/inactive states based on `#If...#Else` blocks.
-    *   Evaluates boolean expressions using the definitions provided via `--define` or `#Const` directives within the code.
-    *   Strips out code that would be inactive in the target environment.
+*   **Logic:** Maintains a stack of active/inactive states based on `#If...#Else` blocks, stripping code that would be inactive in the target environment.
 
 ### 3. Parser (`src/parser.py`)
-*   **Responsibility:** Consumes tokens to build an Abstract Syntax Tree (AST) or structured Node representation.
-*   **Components:**
-    *   **FormParser:** Extracts GUI control definitions from `.frm` headers.
-    *   **VBAParser:** Parses the actual code logic.
-*   **Key Structures:**
-    *   `ModuleNode`: Represents a file (Module, Class, Form).
-    *   `ProcedureNode`: Represents a Sub, Function, Property, or **Declare** statement.
-    *   `TypeNode`: Represents a **User Defined Type (UDT)** definition (`Type...End Type`).
-    *   `StatementNode`: Represents a single line of code.
-    *   `WithNode`: Represents a `With...End With` block (recursive).
+*   **Responsibility:** Consumes tokens to build a structured Node representation (AST).
+*   **Key Structures:** `ModuleNode`, `ProcedureNode`, `TypeNode` (UDT), `StatementNode`, and `WithNode`.
 
 ### 4. Analyzer (`src/analyzer.py`)
 *   **Responsibility:** Performs semantic analysis on the parsed nodes.
 *   **Process:**
-    *   **Pass 1 (Discovery):** Scans all modules to register global variables, public procedures, class names, **UDTs**, and **Declare** statements into the Global Symbol Table.
-    *   **Pass 2 (Resolution):** Walks through procedure bodies to verify logic.
-        *   Creates local scopes for arguments and `Dim` variables.
-        *   Maintains a `With Stack` to resolve dot-notation (`.Value`) against the current `With` object context.
-        *   Validates member access against the loaded Object Model.
-        *   **Heuristics:** Uses prefix-based (e.g., `txt*` -> `Control`) and name-based (e.g., `CellsU` -> `Variant`) heuristics to reduce false positives for dynamic objects.
+    *   **Pass 1 (Discovery):** Scans all modules to register public variables, procedures, classes, and UDTs into the Global Symbol Table.
+    *   **Pass 2 (Verification):** Walks through procedure bodies to verify logic.
+        *   Creates nested local scopes for variables (`Dim`, `Const`).
+        *   Maintains a `With Stack` for member resolution.
+        *   Uses **Heuristics** for Form controls and special objects like `ThisDocument`.
+        *   Validates all identifiers and members against the dynamic **Object Model**.
 
 ### 5. Configuration (`src/config.py`)
-*   **Responsibility:** Manages the Object Model definitions.
-*   **Data:** Loads `src/std_model.json` by default and merges any user-provided JSON models.
+*   **Responsibility:** Manages the Object Model and User-defined constants.
+*   **Logic:** Merges the external JSON model into the active symbol lookup table.
 
 ## Data Flow
 
-```
-Source Code (.bas) -> Lexer -> Tokens -> Preprocessor -> Filtered Tokens 
-                                                              |
-                                                              v
-AST Nodes <----------------------------------------------- Parser
-    |
-    v
-Analyzer (Pass 1 & 2) -> Symbol Tables -> Error Report -> CLI Output
+```mermaid
+graph LR
+    A[Source Code] --> B[Lexer]
+    B --> C[Preprocessor]
+    C --> D[Parser]
+    D --> E[Analyzer Pass 1]
+    E --> F[Analyzer Pass 2]
+    F --> G[JSON Report]
 ```

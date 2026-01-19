@@ -13,7 +13,7 @@ from .analyzer import Analyzer
 init(autoreset=True)
 
 def main():
-    parser = argparse.ArgumentParser(description="VBA Compile Simulator")
+    parser = argparse.ArgumentParser(description="VBAlidator - VBA Static Analysis Tool")
     parser.add_argument("input_folder", help="Path to the folder containing VBA files")
     parser.add_argument("--define", help="Conditional compilation constants (e.g. 'WIN64=True,VBA7=True')")
     parser.add_argument("--model", help="Path to a custom JSON object model definition file")
