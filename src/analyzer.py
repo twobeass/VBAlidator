@@ -398,6 +398,7 @@ class Analyzer:
                                 })
                     last_resolved_type = member_type or 'Unknown'
                     last_resolved_kind = 'Unknown' # Member kind resolution not yet implemented
+                    last_resolved_symbol = None # Members are not scope symbols
                     expect_member = False
                 else:
                     sym = scope.resolve(name)

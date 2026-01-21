@@ -128,6 +128,8 @@ class VBAParser:
                 self.procedures_parse(module, 'Public') 
             elif self.match('IDENTIFIER', 'Type'):
                 self.parse_udt(module)
+            elif self.match('IDENTIFIER', 'Enum'):
+                self.parse_enum(module, 'Public')
             elif self.match('NEWLINE'):
                 self.advance()
             else:
@@ -232,9 +234,12 @@ class VBAParser:
 
         # Handle 'Type' (Public Type ...)
         if self.match('IDENTIFIER', 'Type'):
-            # Delegate to parse_udt but fix scope?
-            # parse_udt consumes 'Type'.
             self.parse_udt(module, scope=scope)
+            return
+
+        # Handle 'Enum' (Public Enum ...)
+        if self.match('IDENTIFIER', 'Enum'):
+            self.parse_enum(module, scope=scope)
             return
 
         # Check if Const
@@ -478,7 +483,16 @@ class VBAParser:
 
                 if is_array and not arg_type.endswith('()'):
                      arg_type += "()"
-                        
+
+                # Handle Default Value (= ...)
+                if self.match('OPERATOR', '='):
+                    self.advance()
+                    # Skip until ',' or ')'
+                    while self.current_token.type != 'EOF':
+                         if self.current_token.type == 'OPERATOR' and self.current_token.value in (',', ')'):
+                             break
+                         self.advance()
+
                 proc.args.append(VariableNode(arg_name, arg_type, 'Local', is_optional=is_optional, is_paramarray=is_paramarray))
             
             if self.match('OPERATOR', ','):
@@ -536,3 +550,55 @@ class VBAParser:
             self.consume_statement()
             
         module.types[type_name] = udt
+
+    def parse_enum(self, module, scope='Public'):
+        self.consume('IDENTIFIER', 'Enum')
+        enum_name = self.current_token.value
+        self.advance()
+        self.consume_statement()
+
+        # Enums are basically Longs with named constants
+        # We need to register the Enum Type AND the Enum Members as global/module constants
+
+        # Create a TypeNode to represent the Enum type itself?
+        # Or just store members?
+        # Analyzer needs to know EnumName is a valid Type.
+        udt = TypeNode(enum_name, scope) # Reuse TypeNode for simplicity
+
+        while self.current_token.type != 'EOF':
+            if self.match('IDENTIFIER', 'End') and self.peek().value.lower() == 'enum':
+                self.advance()
+                self.advance()
+                self.consume_statement()
+                break
+
+            # Member: Name = Value
+            if self.current_token.type == 'IDENTIFIER':
+                member_name = self.current_token.value
+                self.advance()
+
+                # Enum members are constants.
+                # We should register them in the module's constants/variables list?
+                # Or a specific Enum list?
+                # Analyzer expects module.types for types.
+                # For members, it checks variables/constants?
+
+                # Let's treat them as Public Constants for now.
+                # But we also want to support `Dim x As EnumName`.
+
+                # So we register the Enum Type in module.types
+                # AND we register the members as module-level variables (Consts)
+
+                var = VariableNode(member_name, 'Long', scope) # Enum members are Long
+                module.variables.append(var)
+                udt.members.append(var)
+
+                if self.match('OPERATOR', '='):
+                    self.advance()
+                    # Skip value
+                    while self.current_token.type not in ('NEWLINE', 'EOF', 'COMMENT'):
+                        self.advance()
+
+            self.consume_statement()
+
+        module.types[enum_name] = udt
