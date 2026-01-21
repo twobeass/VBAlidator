@@ -457,15 +457,27 @@ class VBAParser:
             if self.current_token.type == 'IDENTIFIER':
                 arg_name = self.current_token.value
                 self.advance()
+
+                is_array = False
+                # Check for array parens on name: arr()
+                if self.match('OPERATOR', '('):
+                        self.advance()
+                        self.consume('OPERATOR', ')')
+                        is_array = True
+
                 arg_type = 'Variant'
                 if self.match('IDENTIFIER', 'As'):
                     self.advance()
                     arg_type = self.parse_type_signature()
                 
+                # Check for array parens on type (rare but supported by my parser previously)
                 if self.match('OPERATOR', '('):
                         self.advance()
                         self.consume('OPERATOR', ')')
-                        arg_type += "()"
+                        is_array = True
+
+                if is_array and not arg_type.endswith('()'):
+                     arg_type += "()"
                         
                 proc.args.append(VariableNode(arg_name, arg_type, 'Local', is_optional=is_optional, is_paramarray=is_paramarray))
             
