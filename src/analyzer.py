@@ -114,7 +114,7 @@ class Analyzer:
             if isinstance(node, StatementNode):
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
-                     self.process_dim(node.tokens, scope, filename)
+                     self.process_dim(node.tokens, scope, filename, context, with_stack)
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
             
@@ -123,7 +123,7 @@ class Analyzer:
                 new_stack = with_stack + [expr_type or 'Unknown']
                 self.analyze_block(node.body, scope, filename, context, new_stack)
 
-    def process_dim(self, tokens, scope, filename):
+    def process_dim(self, tokens, scope, filename, context, with_stack):
         # Simplified Dim parser
         iterator = iter(tokens)
         next(iterator) # Skip Dim
@@ -191,6 +191,45 @@ class Analyzer:
                             if tokens_list[i].value == '(': depth += 1
                             elif tokens_list[i].value == ')': depth -= 1
                             i += 1
+
+            elif t.type == 'OPERATOR' and t.value == '=':
+                # Initialization
+                if current_name:
+                     if current_name.lower() in scope.symbols:
+                         self.errors.append({
+                             "file": filename,
+                             "line": tokens[0].line,
+                             "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
+                         })
+                     else:
+                         t_type = current_type
+                         if is_array and not t_type.endswith('()'): t_type += "()"
+                         scope.define(current_name, t_type, 'Variable')
+
+                     # We defined the variable, now let's analyze the assignment expression
+                     # We need to find where the expression ends (at comma or end of tokens)
+                     expr_start = i + 1
+                     expr_end = len(tokens_list)
+
+                     # Look ahead for comma
+                     depth_parens = 0
+                     for k in range(expr_start, len(tokens_list)):
+                          if tokens_list[k].value == '(': depth_parens += 1
+                          elif tokens_list[k].value == ')': depth_parens -= 1
+                          elif tokens_list[k].value == ',' and depth_parens == 0:
+                               expr_end = k
+                               break
+
+                     expr_tokens = tokens_list[expr_start:expr_end]
+                     self.analyze_statement(expr_tokens, scope, filename, context, with_stack)
+
+                     current_name = None
+                     current_type = 'Variant'
+                     is_array = False
+
+                     i = expr_end
+                else:
+                     i += 1
 
             elif t.value == ',':
                 if current_name:

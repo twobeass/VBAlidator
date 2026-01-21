@@ -26,7 +26,7 @@ class Lexer:
             ('HEX', r'&H[0-9A-Fa-f]+'),
             ('FLOAT', r'\d+\.\d+'),
             ('INTEGER', r'\d+'),
-            ('LINE_CONTINUATION', r' _(\r\n|\n)'), # Handle line continuation
+            ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
             ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:]'), # Added : to operator
