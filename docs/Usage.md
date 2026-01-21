@@ -75,10 +75,8 @@ Expected output includes:
 ### What is NOT Covered
 While VBAlidator is a powerful static analysis tool, it is not a full VBA compiler. Some compile-time and run-time errors may not be detected:
 
-*   **Deep Type Inference:** Complex expression types (e.g. `Set x = CreateObject(...)`) are often treated as `Object` or `Variant`.
 *   **Late Binding:** Calls to objects declared as `Object` or `Variant` are not validated.
-*   **Flow Analysis:** Unreachable code, uninitialized variables (used before assignment), or complex `GoTo` logic are not fully analyzed.
-*   **API Signatures:** Arguments passed to external DLLs (`Declare PtrSafe...`) or COM libraries are checked against the model, but signature mismatches might be missed if the model is incomplete.
+*   **Complex Flow Analysis:** Uninitialized variables (used before assignment) or complex `GoTo` logic (jumping into blocks) are not fully analyzed.
 *   **Runtime Logic:** Errors like "Division by zero" or "Index out of bounds" are runtime errors and are outside the scope of static analysis.
 
 ## Output

@@ -1,7 +1,8 @@
 {
   "globals": {
-    "MsgBox": { "type": "Function", "returns": "Integer" },
-    "InputBox": { "type": "Function", "returns": "String" },
+    "CreateObject": { "type": "Function", "returns": "Object", "min_args": 1, "max_args": 2 },
+    "MsgBox": { "type": "Function", "returns": "Integer", "min_args": 1, "max_args": 5 },
+    "InputBox": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 7 },
     "Debug": { "type": "Debug" },
     "Err": { "type": "ErrObject" },
     "Application": { "type": "Application" },
@@ -73,6 +74,42 @@
         "Caption": { "type": "String" },
         "Enabled": { "type": "Boolean" },
         "Value": { "type": "Boolean" }
+      }
+    },
+    "Scripting.Dictionary": {
+      "members": {
+        "Add": { "type": "Sub" },
+        "Exists": { "type": "Function", "returns": "Boolean" },
+        "Item": { "type": "Property" },
+        "Key": { "type": "Property" },
+        "Remove": { "type": "Sub" },
+        "RemoveAll": { "type": "Sub" },
+        "Count": { "type": "Long" },
+        "Keys": { "type": "Function", "returns": "Variant" },
+        "Items": { "type": "Function", "returns": "Variant" },
+        "CompareMode": { "type": "Property" }
+      }
+    },
+    "Scripting.FileSystemObject": {
+      "members": {
+        "CreateTextFile": { "type": "Function", "returns": "Object" },
+        "OpenTextFile": { "type": "Function", "returns": "Object" },
+        "FileExists": { "type": "Function", "returns": "Boolean" },
+        "FolderExists": { "type": "Function", "returns": "Boolean" },
+        "DeleteFile": { "type": "Sub" },
+        "DeleteFolder": { "type": "Sub" },
+        "MoveFile": { "type": "Sub" },
+        "MoveFolder": { "type": "Sub" },
+        "CopyFile": { "type": "Sub" },
+        "CopyFolder": { "type": "Sub" },
+        "GetFile": { "type": "Function", "returns": "Object" },
+        "GetFolder": { "type": "Function", "returns": "Object" },
+        "GetDrive": { "type": "Function", "returns": "Object" },
+        "GetExtensionName": { "type": "Function", "returns": "String" },
+        "GetBaseName": { "type": "Function", "returns": "String" },
+        "GetParentFolderName": { "type": "Function", "returns": "String" },
+        "BuildPath": { "type": "Function", "returns": "String" },
+        "Drives": { "type": "Object" }
       }
     }
   }
