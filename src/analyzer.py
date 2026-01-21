@@ -520,6 +520,7 @@ class Analyzer:
                 else:
                     last_resolved_type = None
                     last_resolved_kind = None
+                    last_resolved_symbol = None
                     expect_member = False
                     prev_keyword = None
                     i += 1
@@ -527,6 +528,7 @@ class Analyzer:
             elif token.type in ('STRING', 'INTEGER', 'FLOAT'):
                 last_resolved_type = None
                 last_resolved_kind = None
+                last_resolved_symbol = None
                 expect_member = False
                 prev_keyword = None
                 i += 1
