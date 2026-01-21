@@ -114,7 +114,7 @@ class Analyzer:
             if isinstance(node, StatementNode):
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
-                     self.process_dim(node.tokens, scope)
+                     self.process_dim(node.tokens, scope, filename)
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
             
@@ -123,13 +123,14 @@ class Analyzer:
                 new_stack = with_stack + [expr_type or 'Unknown']
                 self.analyze_block(node.body, scope, filename, context, new_stack)
 
-    def process_dim(self, tokens, scope):
+    def process_dim(self, tokens, scope, filename):
         # Simplified Dim parser
         iterator = iter(tokens)
         next(iterator) # Skip Dim
         
         current_name = None
         current_type = 'Variant'
+        is_array = False
         
         tokens_list = list(iterator)
         i = 0
@@ -155,26 +156,72 @@ class Analyzer:
                         else:
                             break
                     current_type = "".join(type_parts)
+                    if is_array:
+                        current_type += "()"
+
                     if current_name:
-                        scope.define(current_name, current_type, 'Variable')
+                        if current_name.lower() in scope.symbols:
+                            self.errors.append({
+                                "file": filename,
+                                "line": tokens[0].line,
+                                "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
+                            })
+                        else:
+                            scope.define(current_name, current_type, 'Variable')
                         current_name = None
                         current_type = 'Variant'
+                        is_array = False
                 else:
                     if current_name:
-                        scope.define(current_name, 'Variant', 'Variable')
+                        # Implicit Variant definition for the previous variable
+                        t_type = "Variant"
+                        if is_array: t_type += "()"
+                        scope.define(current_name, t_type, 'Variable')
+                        is_array = False # Reset for next
+
                     current_name = t.value
                     i += 1
+                    
+                    # Check for Array ()
+                    if i < len(tokens_list) and tokens_list[i].value == '(':
+                        is_array = True
+                        depth = 1
+                        i += 1
+                        while i < len(tokens_list) and depth > 0:
+                            if tokens_list[i].value == '(': depth += 1
+                            elif tokens_list[i].value == ')': depth -= 1
+                            i += 1
+
             elif t.value == ',':
                 if current_name:
-                    scope.define(current_name, current_type, 'Variable')
+                    if current_name.lower() in scope.symbols:
+                        self.errors.append({
+                            "file": filename, 
+                            "line": tokens[0].line,
+                            "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
+                        })
+                    else:
+                        t_type = current_type
+                        if is_array and not t_type.endswith('()'): t_type += "()"
+                        scope.define(current_name, t_type, 'Variable')
                     current_name = None
                     current_type = 'Variant'
+                    is_array = False
                 i += 1
             else:
                 i += 1
         
         if current_name:
-             scope.define(current_name, current_type, 'Variable')
+             if current_name.lower() in scope.symbols:
+                 self.errors.append({
+                     "file": filename,
+                     "line": tokens[0].line,
+                     "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
+                 })
+             else:
+                 t_type = current_type
+                 if is_array and not t_type.endswith('()'): t_type += "()"
+                 scope.define(current_name, t_type, 'Variable')
 
     def resolve_expression_type(self, tokens, scope, with_stack):
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
@@ -196,6 +243,7 @@ class Analyzer:
 
         i = 0
         last_resolved_type = None
+        last_resolved_kind = None
         expect_member = False
         prev_keyword = None
         
@@ -208,6 +256,7 @@ class Analyzer:
                 if name.lower() in KEYWORDS and not expect_member:
                     prev_keyword = name.lower()
                     last_resolved_type = None
+                    last_resolved_kind = None
                     i += 1
                     continue
                 
@@ -217,11 +266,13 @@ class Analyzer:
                         i += 2
                         prev_keyword = None
                         last_resolved_type = None
+                        last_resolved_kind = None
                         continue
                     if tokens[i+1].value == ':=':
                         # Named Argument - skip it and the operator
                         i += 2
                         last_resolved_type = None
+                        last_resolved_kind = None
                         continue
 
                 if prev_keyword in ('goto', 'resume'):
@@ -240,6 +291,7 @@ class Analyzer:
                                     "message": f"Member '{name}' not found in type '{last_resolved_type}' inside '{context}'."
                                 })
                     last_resolved_type = member_type or 'Unknown'
+                    last_resolved_kind = 'Unknown' # Member kind resolution not yet implemented
                     expect_member = False
                 else:
                     sym = scope.resolve(name)
@@ -248,6 +300,7 @@ class Analyzer:
                         enum_val = self.resolve_enum(name)
                         if enum_val is not None:
                              last_resolved_type = 'Long'
+                             last_resolved_kind = 'EnumItem'
                         else:
                             # HEURISTIC: If inside a Form, assume undefined identifier is an implicit Control
                             is_in_form = False
@@ -260,6 +313,7 @@ class Analyzer:
                             
                             if is_in_form:
                                 last_resolved_type = 'Object'
+                                last_resolved_kind = 'Control'
                             else:
                                 if report_errors:
                                     self.errors.append({
@@ -268,8 +322,10 @@ class Analyzer:
                                         "message": f"Undefined identifier '{name}' in '{context}'."
                                     })
                                 last_resolved_type = 'Unknown'
+                                last_resolved_kind = 'Unknown'
                     else:
                         last_resolved_type = sym['type']
+                        last_resolved_kind = sym.get('kind', 'Unknown')
                 
                 prev_keyword = None
                 i += 1
@@ -279,6 +335,7 @@ class Analyzer:
                     if last_resolved_type is None:
                         if with_stack:
                             last_resolved_type = with_stack[-1]
+                            last_resolved_kind = 'Unknown'
                         else:
                             if report_errors:
                                 self.errors.append({
@@ -287,26 +344,58 @@ class Analyzer:
                                     "message": f"Invalid or unexpected . reference without With block in '{context}'."
                                 })
                             last_resolved_type = 'Unknown'
+                            last_resolved_kind = 'Unknown'
                     expect_member = True
                     i += 1
                 elif token.value == '(':
                     depth = 1
                     i += 1
+                    start_index = i
                     while i < len(tokens) and depth > 0:
                         if tokens[i].type == 'OPERATOR':
                             if tokens[i].value == '(': depth += 1
                             elif tokens[i].value == ')': depth -= 1
                         i += 1
-                    last_resolved_type = 'Variant'
+                    
+                    end_index = i - 1
+                    
+                    # Check if we are invoking something that isn't callable
+                    # Must be a Variable (not a Procedure/Function) AND have a non-array scalar type
+                    if last_resolved_kind == 'Variable' and last_resolved_type in ('String', 'Integer', 'Long', 'Boolean', 'Double', 'Currency', 'Date', 'Single', 'Byte'):
+                         if report_errors:
+                            self.errors.append({
+                                "file": filename,
+                                "line": token.line,
+                                "message": f"Expected Array or Procedure, got variable '{prev_keyword or 'Unknown'}' of type '{last_resolved_type}'."
+                            })
+
+                    # Recursively analyze the content inside the parentheses
+                    inner_type = 'Variant'
+                    if end_index > start_index:
+                        sub_tokens = tokens[start_index : end_index]
+                        inner_type = self.analyze_statement(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors)
+                    
+                    # Determine result type
+                    if last_resolved_type is None:
+                        # Grouping (Expression)
+                        last_resolved_type = inner_type
+                        last_resolved_kind = 'Unknown'
+                    else:
+                        # Function/Array Call
+                        last_resolved_type = 'Variant'
+                        last_resolved_kind = 'Unknown'
+                        
                     expect_member = False
                 else:
                     last_resolved_type = None
+                    last_resolved_kind = None
                     expect_member = False
                     prev_keyword = None
                     i += 1
             
             elif token.type in ('STRING', 'INTEGER', 'FLOAT'):
                 last_resolved_type = None
+                last_resolved_kind = None
                 expect_member = False
                 prev_keyword = None
                 i += 1

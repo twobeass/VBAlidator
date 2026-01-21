@@ -20,6 +20,7 @@ We provide a 2-step process to generate this model by inspecting the host applic
     ```
     *   This script uses COM to inspect the libraries and produces `vba_model.json`.
     *   It handles **CoClass member inheritance**, property name normalization, and promotes library functions (like `Mid`, `InStr`) to the global scope.
+    *   **Enhancement**: It robustly extracts **Enums** and **Module-level Constants** (e.g., `visNone`, `vbCrLf`) even if they are defined as raw integer attributes, ensuring thorough validation against the host object model.
 
 ### Using the Model
 Pass the generated `vba_model.json` to VBAlidator using the `--model` flag:

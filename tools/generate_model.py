@@ -101,26 +101,40 @@ def generate_model():
                                 if name == "VBA" and not clean_name.startswith("_"):
                                     model["globals"][clean_name] = {"type": "Variant"}
                     
-                    # 2. Enums (Heuristic: Classes with _case_insensitive_ or just integers)
-                    # Comtypes often generates Enums as classes with class attributes for values
-                    if isinstance(attr, type) and not hasattr(attr, '_methods_') and not hasattr(attr, '_disp_methods_') and not hasattr(attr, '_reg_clsid_'):
-                         # Inspect attributes for integer values
-                        enum_name = str(attr_name)
+                    # 2. Enums and Constants Containers
+                    
+                    # Heuristic A: Top-level standard Integer Constants (e.g. visNone)
+                    if isinstance(attr, int):
+                         if attr_name not in model["globals"] and not attr_name.startswith("_"):
+                             model["globals"][attr_name] = {"type": "Long", "kind": "Constant"}
+
+                    # Heuristic B: Classes/Modules containing constants
+                    # Heuristic: any class/module with integer attributes is a potential source of constants
+                    elif isinstance(attr, type):
                         enum_values = {}
-                        has_enum_values = False
                         for e_name in dir(attr):
                             if e_name.startswith("_"): continue
-                            val = getattr(attr, e_name)
-                            if isinstance(val, int):
-                                enum_values[e_name] = val
-                                has_enum_values = True
+                            try:
+                                val = getattr(attr, e_name)
+                                if isinstance(val, int):
+                                    enum_values[e_name] = val
+                            except: pass
                         
-                        if has_enum_values:
-                             model["enums"][enum_name] = enum_values
-                             # Also promote enum members to globals (implicit in VBA)
-                             # Or store them in model["enums"] structure where keys are global
-                             # For now, let's just make sure they are accessible via resolve_enum
-                             pass
+                        if enum_values:
+                            enum_name = str(attr_name)
+                            # Only treat as purely Enum if it has no methods (existing logic),
+                            # OR if it seems to be a dedicated constants container (like many VBA modules)
+                            
+                            # Merge into model["enums"]
+                            if enum_name not in model["enums"]:
+                                model["enums"][enum_name] = enum_values
+                            else:
+                                model["enums"][enum_name].update(enum_values)
+                                
+                            # Promote to Globals (Critical for Visio/VBA constants)
+                            for e_k in enum_values.keys():
+                                if e_k not in model["globals"]:
+                                    model["globals"][e_k] = {"type": "Long", "kind": "EnumItem"}
 
                 except Exception:
                      pass
