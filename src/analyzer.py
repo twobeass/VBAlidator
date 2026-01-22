@@ -513,7 +513,14 @@ class Analyzer:
                             last_resolved_type = inferred_ret_type
                         elif last_resolved_type.endswith('()'):
                              last_resolved_type = last_resolved_type[:-2]
-                        # Else keep the type (it's the return type of the function)
+                        
+                        else:
+                            # Default Property Logic (e.g. Selection(1) -> Selection.Item(1))
+                            # If the type is an object and has an "Item" member, resolve to that type.
+                            item_type = self.resolve_member(last_resolved_type, 'Item')
+                            if item_type:
+                                last_resolved_type = item_type
+                            # Otherwise, we keep the original type (it might be a function return type)
 
                         last_resolved_kind = 'Unknown'
                         

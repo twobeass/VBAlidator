@@ -42101,7 +42101,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Document"
         },
         "Count": {
           "type": "Variant"
@@ -43230,7 +43230,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Layer"
         },
         "Add": {
           "type": "Variant"
@@ -43730,7 +43730,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Master"
         },
         "Count": {
           "type": "Variant"
@@ -44525,7 +44525,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Page"
         },
         "Count": {
           "type": "Variant"
@@ -44779,7 +44779,7 @@
           "type": "Variant"
         },
         "Item16": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Count16": {
           "type": "Variant"
@@ -44914,7 +44914,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Count": {
           "type": "Variant"
@@ -44932,7 +44932,7 @@
           "type": "Variant"
         },
         "PrimaryItem": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Picture": {
           "type": "Variant"
@@ -45693,7 +45693,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Count16": {
           "type": "Variant"
@@ -46916,7 +46916,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Window"
         },
         "Count": {
           "type": "Variant"
@@ -61799,7 +61799,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "_NewEnum": {
           "type": "Variant"
@@ -66607,7 +66607,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Page"
         },
         "Enum": {
           "type": "Variant"
@@ -112514,7 +112514,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Window"
         },
         "_NewEnum": {
           "type": "Variant"
@@ -121203,7 +121203,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Document"
         },
         "Count": {
           "type": "Variant"
@@ -122171,7 +122171,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Layer"
         },
         "Add": {
           "type": "Variant"
@@ -122671,7 +122671,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Master"
         },
         "Count": {
           "type": "Variant"
@@ -123220,7 +123220,7 @@
           "type": "Variant"
         },
         "Item16": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Count16": {
           "type": "Variant"
@@ -123355,7 +123355,7 @@
           "type": "Variant"
         },
         "Item": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Count": {
           "type": "Variant"
@@ -123373,7 +123373,7 @@
           "type": "Variant"
         },
         "PrimaryItem": {
-          "type": "Variant"
+          "type": "Shape"
         },
         "Picture": {
           "type": "Variant"

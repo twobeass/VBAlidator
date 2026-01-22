@@ -279,8 +279,30 @@ def generate_model():
         for cls in ["CommandButton", "TextBox", "Label", "ListBox", "ComboBox", "CheckBox", "OptionButton", "Frame", "Image"]:
             if cls in model["classes"]:
                 for m_name, m_def in control_members.items():
-                    if m_name not in model["classes"][cls]["members"]:
                         model["classes"][cls]["members"][m_name] = m_def
+
+    # Refine Collection Item Types (Selection.Item -> Shape, not Variant)
+    collection_fixes = {
+        "IVSelection": {"Item": "Shape", "Item16": "Shape", "PrimaryItem": "Shape"},
+        "Selection": {"Item": "Shape", "Item16": "Shape", "PrimaryItem": "Shape"},
+        "IVShapes": {"Item": "Shape"},
+        "Shapes": {"Item": "Shape"},
+        "IVMasters": {"Item": "Master"},
+        "Masters": {"Item": "Master"},
+        "IVPages": {"Item": "Page"},
+        "Pages": {"Item": "Page"},
+        "IVDocuments": {"Item": "Document"},
+        "Documents": {"Item": "Document"},
+        "IVLayers": {"Item": "Layer"},
+        "Layers": {"Item": "Layer"},
+        "IVWindows": {"Item": "Window"},
+        "Windows": {"Item": "Window"}
+    }
+    for cls_name, updates in collection_fixes.items():
+        if cls_name in model["classes"]:
+            for mem, new_type in updates.items():
+                 if mem in model["classes"][cls_name]["members"]:
+                      model["classes"][cls_name]["members"][mem]["type"] = new_type
 
 
     output_file = "vba_model.json"

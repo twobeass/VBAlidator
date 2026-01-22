@@ -26,6 +26,7 @@
     *   **Pass 2 (Verification):** Walks through procedure bodies to verify logic.
         *   Creates nested local scopes for variables (`Dim`, `Const`).
         *   Maintains a `With Stack` for member resolution.
+        *   **Default Member Resolution**: Handles implicit `Item` calls (e.g. `Col(1)`).
         *   Uses **Heuristics** for Form controls and special objects like `ThisDocument`.
         *   Validates all identifiers and members against the dynamic **Object Model**.
 

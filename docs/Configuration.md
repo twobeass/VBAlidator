@@ -20,7 +20,8 @@ We provide a 2-step process to generate this model by inspecting the host applic
     ```
     *   This script uses COM to inspect the libraries and produces `vba_model.json`.
     *   It handles **CoClass member inheritance**, property name normalization, and promotes library functions (like `Mid`, `InStr`) to the global scope.
-    *   **Enhancement**: It robustly extracts **Enums** and **Module-level Constants** (e.g., `visNone`, `vbCrLf`) even if they are defined as raw integer attributes, ensuring thorough validation against the host object model.
+    *   **Enhancement**: It robustly extracts **Enums** and **Module-level Constants** (e.g., `visNone`, `vbCrLf`).
+    *   **Type Refinement**: Automatically maps generic collection accessors (like `Selection.Item`) to specific types (e.g., `Shape`), ensuring strict validation for collection items.
 
 ### Using the Model
 Pass the generated `vba_model.json` to VBAlidator using the `--model` flag:
@@ -41,6 +42,7 @@ In `.frm` modules, any undefined identifier is automatically treated as an `Obje
 ### 2. Standard VBA Callbacks
 *   **`UserForm` Fallback**: If a member is not found on a Form object, VBAlidator checks the base `UserForm` class for common properties (`Show`, `Hide`, `Controls`, `Width`, `Height`).
 *   **`ThisDocument` Fallback**: In projects with a `ThisDocument` module, members not found in the module are resolved against the base `Document` / `IVDocument` class.
+*   **Default Member Resolution**: When an object is called like a function (e.g., `Selection(1)`), VBAlidator automatically resolves this to the object's `Item` property (e.g., `Selection.Item(1)`). This ensures that implicit collection access is strictly typed (e.g., `Selection(1)` resolves to `Shape`).
 
 ### 3. Case Insensitivity
 VBA is case-insensitive. VBAlidator normalizes all model lookups (classes, members, enums, globals) to lowercase to ensure `ActivePage` matches `activepage`.

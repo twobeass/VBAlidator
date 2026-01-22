@@ -1,0 +1,13 @@
+{
+  "references": [
+    { "name": "VBA", "guid": "{000204EF-0000-0000-C000-000000000046}", "major": 4, "minor": 2, "path": "C:\\Program Files\\Common Files\\Microsoft Shared\\VBA\\VBA7.1\\VBE7.DLL" },
+    { "name": "Visio", "guid": "{00021A98-0000-0000-C000-000000000046}", "major": 4, "minor": 16, "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\VISLIB.DLL" },
+    { "name": "stdole", "guid": "{00020430-0000-0000-C000-000000000046}", "major": 2, "minor": 0, "path": "C:\\Windows\\System32\\stdole2.tlb" },
+    { "name": "Office", "guid": "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}", "major": 2, "minor": 8, "path": "C:\\Program Files\\Common Files\\Microsoft Shared\\OFFICE16\\MSO.DLL" },
+    { "name": "MSForms", "guid": "{0D452EE1-E08F-101A-852E-02608C4D0BB4}", "major": 2, "minor": 0, "path": "C:\\WINDOWS\\system32\\FM20.DLL" },
+    { "name": "ADODB", "guid": "{B691E011-1797-432E-907A-4D8C69339129}", "major": 6, "minor": 1, "path": "C:\\Program Files\\Common Files\\System\\ado\\msado15.dll" },
+    { "name": "Scripting", "guid": "{420B2830-E718-11CF-893D-00A0C9054228}", "major": 1, "minor": 0, "path": "C:\\Windows\\System32\\scrrun.dll" },
+    { "name": "Excel", "guid": "{00020813-0000-0000-C000-000000000046}", "major": 1, "minor": 9, "path": "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE" },
+    { "name": "ElevatorLib", "guid": "{0014D784-7012-4A79-8AB6-ADDB8193A06E}", "major": 1, "minor": 0, "path": "C:\\\\Program Files\\\\Microsoft Office\\\\root\\\\Office16\\\\EXCEL.EXE" }
+  ]
+}

@@ -1,5 +1,4 @@
 __pycache__/
 *.pyc
 vba_report.json
-vba_references.json
 debug_model.py
