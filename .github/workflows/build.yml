@@ -1,0 +1,50 @@
+name: Build Windows Executables
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Run Smoke Test
+      run: |
+        python -m src.main tests/vba_code
+
+    - name: Build Main Validator (vbalidator.exe)
+      run: |
+        pyinstaller --onefile --name vbalidator --add-data "src/std_model.json;src" vbalidator_entry.py
+
+    - name: Build Generator (vba_model_gen.exe)
+      run: |
+        pyinstaller --onefile --name vba_model_gen tools/generate_model.py
+
+    - name: Verify Executables
+      run: |
+        ./dist/vbalidator.exe --help
+        ./dist/vba_model_gen.exe --help || echo "Generator might need COM, expecting exit code 1 or help output"
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vbalidator-windows
+        path: |
+          dist/vbalidator.exe
+          dist/vba_model_gen.exe

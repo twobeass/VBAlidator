@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 class Config:
     def __init__(self):
@@ -33,8 +34,18 @@ class Config:
 
     def load_standard_model(self):
         """Loads the built-in standard model."""
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        std_model_path = os.path.join(base_path, 'std_model.json')
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            base_path = sys._MEIPASS
+            std_model_path = os.path.join(base_path, 'src', 'std_model.json')
+            # If pyinstaller didn't keep the src structure (depends on spec), check root
+            if not os.path.exists(std_model_path):
+                 std_model_path = os.path.join(base_path, 'std_model.json')
+        else:
+            # Running as script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            std_model_path = os.path.join(base_path, 'std_model.json')
+
         if os.path.exists(std_model_path):
             self.load_model(std_model_path)
         else:
