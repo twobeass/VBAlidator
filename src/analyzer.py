@@ -5,10 +5,10 @@ class SymbolTable:
         self.name = name
         self.parent = parent
         self.scope_type = scope_type
-        self.symbols = {} # name -> {type: ..., kind: Var/Proc/Class}
+        self.symbols = {} # name -> {type: ..., kind: Var/Proc/Class, extra: ...}
 
-    def define(self, name, type_name, kind):
-        self.symbols[name.lower()] = {"type": type_name, "kind": kind}
+    def define(self, name, type_name, kind, extra=None):
+        self.symbols[name.lower()] = {"type": type_name, "kind": kind, "extra": extra}
 
     def resolve(self, name):
         name = name.lower()
@@ -28,7 +28,10 @@ class Analyzer:
         
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
-            self.global_scope.define(name, defn.get("type", "Variant"), "Global")
+            # Use 'returns' as type if available, otherwise 'type'
+            type_name = defn.get("returns", defn.get("type", "Variant"))
+            kind = defn.get("type", "Global")
+            self.global_scope.define(name, type_name, kind, extra=defn)
             
         # Load Classes into Global Scope (as Types)
         for name in self.config.object_model.get("classes", {}).keys():
@@ -67,7 +70,7 @@ class Analyzer:
                 
                 for proc in mod.procedures:
                     if proc.scope.lower() == 'public':
-                         self.global_scope.define(proc.name, proc.return_type, 'Procedure')
+                         self.global_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
                 
                 # Register Public Types
                 for type_name, udt in mod.types.items():
@@ -89,7 +92,7 @@ class Analyzer:
             for var in mod.variables:
                 mod_scope.define(var.name, var.type_name, 'Variable')
             for proc in mod.procedures:
-                mod_scope.define(proc.name, proc.return_type, 'Procedure')
+                mod_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
             # Register Local/Private Types in Module Scope
             for type_name, udt in mod.types.items():
                 mod_scope.define(type_name, type_name, 'Type')
@@ -110,18 +113,61 @@ class Analyzer:
         self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
 
     def analyze_block(self, nodes, scope, filename, context, with_stack):
+        unreachable = False
+        prev_node = None
+
         for node in nodes:
             if isinstance(node, StatementNode):
+                # Check for Label
+                if self.is_label(node.tokens):
+                    unreachable = False
+
+                # Check for Control Flow Boundary (e.g. End If, Else, Next) -> Reset unreachable
+                # Heuristic: If we hit a block boundary, assume the jump was conditional or we merged back
+                if unreachable and self.is_control_flow_boundary(node.tokens):
+                    unreachable = False
+
+                if unreachable:
+                    if not self.is_ignorable(node.tokens):
+                        self.errors.append({
+                            "file": filename,
+                            "line": node.tokens[0].line,
+                            "message": f"Unreachable code detected in '{context}'."
+                        })
+
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
                      self.process_dim(node.tokens, scope, filename, context, with_stack)
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
+
+                # Check for Jump
+                if self.is_unconditional_jump(node.tokens):
+                    # Check if conditional (e.g. "If x Then Exit Sub" split by colon)
+                    is_conditional_jump = False
+                    if prev_node and isinstance(prev_node, StatementNode):
+                         # Check if on same line
+                         if prev_node.tokens and node.tokens and prev_node.tokens[0].line == node.tokens[0].line:
+                             # Check if prev starts with If
+                             if prev_node.tokens[0].value.lower() == 'if':
+                                 is_conditional_jump = True
+
+                    if not is_conditional_jump:
+                        unreachable = True
             
             elif isinstance(node, WithNode):
+                if unreachable:
+                     self.errors.append({
+                         "file": filename,
+                         "line": node.expr_tokens[0].line if node.expr_tokens else 0,
+                         "message": f"Unreachable code detected (With block) in '{context}'."
+                     })
+
                 expr_type = self.resolve_expression_type(node.expr_tokens, scope, with_stack)
                 new_stack = with_stack + [expr_type or 'Unknown']
                 self.analyze_block(node.body, scope, filename, context, new_stack)
+
+            prev_node = node
 
     def process_dim(self, tokens, scope, filename, context, with_stack):
         # Simplified Dim parser
@@ -283,19 +329,40 @@ class Analyzer:
         i = 0
         last_resolved_type = None
         last_resolved_kind = None
+        last_resolved_name = None
+        last_resolved_symbol = None
         expect_member = False
         prev_keyword = None
         
         while i < len(tokens):
             token = tokens[i]
             
+            # Check for Implicit Call (Sub style)
+            if last_resolved_kind in ('Function', 'Procedure', 'Global') and last_resolved_name and not expect_member:
+                 is_arg_start = False
+                 if token.type in ('STRING', 'INTEGER', 'FLOAT'): is_arg_start = True
+                 elif token.type == 'IDENTIFIER': is_arg_start = True
+                 elif token.type == 'OPERATOR' and token.value.lower() in ('-', 'not', 'byval', 'byref'): is_arg_start = True
+
+                 if is_arg_start:
+                      arg_tokens = tokens[i:]
+                      if report_errors and last_resolved_symbol:
+                           self.validate_signature(last_resolved_name, last_resolved_symbol, arg_tokens, filename, token.line, context)
+
+                      args = self.split_args(arg_tokens)
+                      for arg in args:
+                          self.analyze_statement(arg, scope, filename, context, with_stack, report_errors=report_errors)
+                      break
+
             if token.type == 'IDENTIFIER':
                 name = token.value
+                last_resolved_name = name
                 
                 if name.lower() in KEYWORDS and not expect_member:
                     prev_keyword = name.lower()
                     last_resolved_type = None
                     last_resolved_kind = None
+                    last_resolved_symbol = None
                     i += 1
                     continue
                 
@@ -331,9 +398,11 @@ class Analyzer:
                                 })
                     last_resolved_type = member_type or 'Unknown'
                     last_resolved_kind = 'Unknown' # Member kind resolution not yet implemented
+                    last_resolved_symbol = None # Members are not scope symbols
                     expect_member = False
                 else:
                     sym = scope.resolve(name)
+                    last_resolved_symbol = sym
                     if not sym:
                         # Dynamic ENUM Lookup
                         enum_val = self.resolve_enum(name)
@@ -341,6 +410,7 @@ class Analyzer:
                              last_resolved_type = 'Long'
                              last_resolved_kind = 'EnumItem'
                         else:
+                            last_resolved_symbol = None
                             # HEURISTIC: If inside a Form, assume undefined identifier is an implicit Control
                             is_in_form = False
                             curr = scope
@@ -365,6 +435,7 @@ class Analyzer:
                     else:
                         last_resolved_type = sym['type']
                         last_resolved_kind = sym.get('kind', 'Unknown')
+                        last_resolved_symbol = sym
                 
                 prev_keyword = None
                 i += 1
@@ -410,8 +481,25 @@ class Analyzer:
 
                     # Recursively analyze the content inside the parentheses
                     inner_type = 'Variant'
+                    inferred_ret_type = None
+
+                    sub_tokens = []
                     if end_index > start_index:
                         sub_tokens = tokens[start_index : end_index]
+
+                    # Hook for CreateObject("ProgID")
+                    if last_resolved_name and last_resolved_name.lower() == 'createobject':
+                            if len(sub_tokens) > 0 and sub_tokens[0].type == 'STRING':
+                                prog_id = sub_tokens[0].value.strip('"')
+                                # Try to resolve ProgID as class
+                                if self.config.get_class(prog_id):
+                                    inferred_ret_type = prog_id
+
+                    # Hook for Signature Validation
+                    if report_errors and last_resolved_symbol:
+                            self.validate_signature(last_resolved_name, last_resolved_symbol, sub_tokens, filename, token.line, context)
+
+                    if sub_tokens:
                         inner_type = self.analyze_statement(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors)
                     
                     # Determine result type
@@ -421,13 +509,19 @@ class Analyzer:
                         last_resolved_kind = 'Unknown'
                     else:
                         # Function/Array Call
-                        last_resolved_type = 'Variant'
+                        if inferred_ret_type:
+                            last_resolved_type = inferred_ret_type
+                        elif last_resolved_type.endswith('()'):
+                             last_resolved_type = last_resolved_type[:-2]
+                        # Else keep the type (it's the return type of the function)
+
                         last_resolved_kind = 'Unknown'
                         
                     expect_member = False
                 else:
                     last_resolved_type = None
                     last_resolved_kind = None
+                    last_resolved_symbol = None
                     expect_member = False
                     prev_keyword = None
                     i += 1
@@ -435,6 +529,7 @@ class Analyzer:
             elif token.type in ('STRING', 'INTEGER', 'FLOAT'):
                 last_resolved_type = None
                 last_resolved_kind = None
+                last_resolved_symbol = None
                 expect_member = False
                 prev_keyword = None
                 i += 1
@@ -442,6 +537,69 @@ class Analyzer:
                 i += 1
         
         return last_resolved_type
+
+    def split_args(self, tokens):
+        args = []
+        if not tokens: return args
+
+        current_arg = []
+        depth = 0
+        for t in tokens:
+            if t.value == '(':
+                depth += 1
+                current_arg.append(t)
+            elif t.value == ')':
+                depth -= 1
+                current_arg.append(t)
+            elif t.value == ',' and depth == 0:
+                args.append(current_arg)
+                current_arg = []
+            else:
+                current_arg.append(t)
+        if current_arg or (args and tokens[-1].value == ','):
+             args.append(current_arg)
+        return args
+
+    def validate_signature(self, name, symbol, arg_tokens, filename, line, context):
+        extra = symbol.get('extra')
+        if not extra: return
+
+        args = self.split_args(arg_tokens)
+        arg_count = len(args)
+
+        min_args = 0
+        max_args = 999
+
+        if isinstance(extra, ProcedureNode):
+             min_args = 0
+             max_args = len(extra.args)
+             has_param_array = False
+
+             for arg in extra.args:
+                  if getattr(arg, 'is_paramarray', False):
+                       has_param_array = True
+
+                  if not arg.is_optional and not getattr(arg, 'is_paramarray', False):
+                       min_args += 1
+
+             if has_param_array:
+                  max_args = 999
+        elif isinstance(extra, dict):
+             min_args = extra.get('min_args', 0)
+             max_args = extra.get('max_args', 999)
+
+        if arg_count < min_args:
+             self.errors.append({
+                 "file": filename,
+                 "line": line,
+                 "message": f"Argument count mismatch for '{name}': Expected at least {min_args}, got {arg_count}."
+             })
+        if arg_count > max_args:
+             self.errors.append({
+                 "file": filename,
+                 "line": line,
+                 "message": f"Argument count mismatch for '{name}': Expected at most {max_args}, got {arg_count}."
+             })
 
     def resolve_member(self, type_name, member_name):
         return self._resolve_member_internal(type_name, member_name)
@@ -517,6 +675,58 @@ class Analyzer:
                                  return m_def.get('type', 'Variant')
 
         return None
+
+    def is_label(self, tokens):
+        if len(tokens) >= 2:
+            if tokens[0].type == 'IDENTIFIER' and tokens[1].type == 'OPERATOR' and tokens[1].value == ':':
+                return True
+        return False
+
+    def is_ignorable(self, tokens):
+        if not tokens: return True
+        for t in tokens:
+            if t.type != 'COMMENT':
+                return False
+        return True
+
+    def is_unconditional_jump(self, tokens):
+        if not tokens: return False
+        t0 = tokens[0]
+        val = t0.value.lower()
+
+        if val == 'goto':
+            # Check if strictly GoTo Label (Simple GoTo is 2 tokens, plus maybe a colon if parsed that way)
+            if len(tokens) >= 2 and tokens[1].type == 'IDENTIFIER':
+                 # Ensure it's not On Error GoTo ...
+                 if len(tokens) == 2: return True
+                 if len(tokens) == 3 and tokens[2].value == ':': return True
+
+        if val == 'exit':
+            if len(tokens) >= 2:
+                t1 = tokens[1].value.lower()
+                if t1 in ('sub', 'function', 'property'):
+                    return True
+
+        if val == 'end':
+            if len(tokens) == 1: return True
+            if len(tokens) == 2 and tokens[1].value == ':': return True
+
+        return False
+
+    def is_control_flow_boundary(self, tokens):
+        if not tokens: return False
+        val = tokens[0].value.lower()
+
+        if val in ('else', 'elseif', 'next', 'loop', 'wend', 'case'):
+            return True
+
+        if val == 'end':
+            if len(tokens) >= 2:
+                 val2 = tokens[1].value.lower()
+                 if val2 in ('if', 'select', 'with'):
+                     return True
+
+        return False
 
     def resolve_enum(self, name):
         # Look up enum constants

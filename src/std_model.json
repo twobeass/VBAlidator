@@ -1,8 +1,37 @@
 {
   "globals": {
-    "MsgBox": { "type": "Function", "returns": "Integer" },
-    "InputBox": { "type": "Function", "returns": "String" },
+    "CreateObject": { "type": "Function", "returns": "Object", "min_args": 1, "max_args": 2 },
+    "MsgBox": { "type": "Function", "returns": "Integer", "min_args": 1, "max_args": 5 },
+    "InputBox": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 7 },
+    "VBA": { "type": "Object" },
     "Debug": { "type": "Debug" },
+    "IIf": { "type": "Function", "returns": "Variant", "min_args": 3, "max_args": 3 },
+    "InStr": { "type": "Function", "returns": "Long", "min_args": 2, "max_args": 4 },
+    "CStr": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+    "CLng": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 1 },
+    "CInt": { "type": "Function", "returns": "Integer", "min_args": 1, "max_args": 1 },
+    "CDbl": { "type": "Function", "returns": "Double", "min_args": 1, "max_args": 1 },
+    "CBool": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
+    "CDate": { "type": "Function", "returns": "Date", "min_args": 1, "max_args": 1 },
+    "CByte": { "type": "Function", "returns": "Byte", "min_args": 1, "max_args": 1 },
+    "UBound": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 2 },
+    "LBound": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 2 },
+    "TimeSerial": { "type": "Function", "returns": "Date", "min_args": 3, "max_args": 3 },
+    "DateSerial": { "type": "Function", "returns": "Date", "min_args": 3, "max_args": 3 },
+    "Int": { "type": "Function", "returns": "Integer", "min_args": 1, "max_args": 1 },
+    "Abs": { "type": "Function", "returns": "Double", "min_args": 1, "max_args": 1 },
+    "StrPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
+    "VarPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
+    "ObjPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
+    "vbNewLine": { "type": "String" },
+    "vbCrLf": { "type": "String" },
+    "vbCr": { "type": "String" },
+    "vbLf": { "type": "String" },
+    "vbTab": { "type": "String" },
+    "vbBack": { "type": "String" },
+    "vbFormFeed": { "type": "String" },
+    "vbNullString": { "type": "String" },
+    "vbNullChar": { "type": "String" },
     "Err": { "type": "ErrObject" },
     "Application": { "type": "Application" },
     "ActiveSheet": { "type": "Worksheet" },
@@ -28,7 +57,44 @@
         "Raise": {"type":"Sub"}, 
         "Number": {"type":"Long"}, 
         "Description": {"type":"String"}, 
-        "Source": {"type":"String"}
+        "Source": {"type":"String"},
+        "LastDllError": {"type":"Long"},
+        "HelpFile": {"type":"String"},
+        "HelpContext": {"type":"Long"}
+      }
+    },
+    "Dictionary": {
+      "members": {
+        "Add": { "type": "Sub" },
+        "Exists": { "type": "Function", "returns": "Boolean" },
+        "Item": { "type": "Property" },
+        "Key": { "type": "Property" },
+        "Remove": { "type": "Sub" },
+        "RemoveAll": { "type": "Sub" },
+        "Count": { "type": "Long" },
+        "Keys": { "type": "Function", "returns": "Variant" },
+        "Items": { "type": "Function", "returns": "Variant" },
+        "CompareMode": { "type": "Property" }
+      }
+    },
+    "WinHttpRequest": {
+      "members": {
+        "Open": { "type": "Sub" },
+        "SetRequestHeader": { "type": "Sub" },
+        "Send": { "type": "Sub" },
+        "WaitForResponse": { "type": "Function", "returns": "Boolean" },
+        "Status": { "type": "Long" },
+        "StatusText": { "type": "String" },
+        "ResponseText": { "type": "String" },
+        "ResponseBody": { "type": "Variant" },
+        "ResponseStream": { "type": "Object" },
+        "Option": { "type": "Property" },
+        "SetClientCertificate": { "type": "Sub" },
+        "SetAutoLogonPolicy": { "type": "Sub" },
+        "SetTimeouts": { "type": "Sub" },
+        "SetProxy": { "type": "Sub" },
+        "SetCredentials": { "type": "Sub" },
+        "Abort": { "type": "Sub" }
       }
     },
     "Collection": {
@@ -73,6 +139,42 @@
         "Caption": { "type": "String" },
         "Enabled": { "type": "Boolean" },
         "Value": { "type": "Boolean" }
+      }
+    },
+    "Scripting.Dictionary": {
+      "members": {
+        "Add": { "type": "Sub" },
+        "Exists": { "type": "Function", "returns": "Boolean" },
+        "Item": { "type": "Property" },
+        "Key": { "type": "Property" },
+        "Remove": { "type": "Sub" },
+        "RemoveAll": { "type": "Sub" },
+        "Count": { "type": "Long" },
+        "Keys": { "type": "Function", "returns": "Variant" },
+        "Items": { "type": "Function", "returns": "Variant" },
+        "CompareMode": { "type": "Property" }
+      }
+    },
+    "Scripting.FileSystemObject": {
+      "members": {
+        "CreateTextFile": { "type": "Function", "returns": "Object" },
+        "OpenTextFile": { "type": "Function", "returns": "Object" },
+        "FileExists": { "type": "Function", "returns": "Boolean" },
+        "FolderExists": { "type": "Function", "returns": "Boolean" },
+        "DeleteFile": { "type": "Sub" },
+        "DeleteFolder": { "type": "Sub" },
+        "MoveFile": { "type": "Sub" },
+        "MoveFolder": { "type": "Sub" },
+        "CopyFile": { "type": "Sub" },
+        "CopyFolder": { "type": "Sub" },
+        "GetFile": { "type": "Function", "returns": "Object" },
+        "GetFolder": { "type": "Function", "returns": "Object" },
+        "GetDrive": { "type": "Function", "returns": "Object" },
+        "GetExtensionName": { "type": "Function", "returns": "String" },
+        "GetBaseName": { "type": "Function", "returns": "String" },
+        "GetParentFolderName": { "type": "Function", "returns": "String" },
+        "BuildPath": { "type": "Function", "returns": "String" },
+        "Drives": { "type": "Object" }
       }
     }
   }
