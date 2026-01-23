@@ -24,7 +24,7 @@ class Lexer:
             ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
             ('DATELITERAL', r'\#[^#\r\n]+\#'),
             ('HEX', r'&H[0-9A-Fa-f]+'),
-            ('FLOAT', r'\d+\.\d+'),
+            ('FLOAT', r'(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+'),
             ('INTEGER', r'\d+'),
             ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline

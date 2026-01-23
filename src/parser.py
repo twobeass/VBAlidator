@@ -80,8 +80,9 @@ class FormParser:
         return controls
 
 class VBAParser:
-    def __init__(self, tokens):
+    def __init__(self, tokens, filename="Unknown"):
         self.tokens = tokens
+        self.filename = filename
         self.pos = 0
         self.current_token = None
         self.advance()
@@ -344,79 +345,69 @@ class VBAParser:
         
         while self.current_token.type != 'EOF':
             # Check for End Markers
-            # Helper to check if current token sequence matches "End Sub", "End With", etc.
-            is_end = False
-            
-            # Simple check: If current is 'End' and next is X, check "End X"
-            # Or if marker is just "End"
-            if self.current_token.type == 'IDENTIFIER':
-                # Check strict multi-word markers first
-                # We need to peek ahead without consuming
-                pass 
-
-            # Let's peek
-            if self.current_token.value.lower() == 'end':
+            if self.current_token.type == 'IDENTIFIER' and self.current_token.value.lower() == 'end':
+                # Peek to see what kind of End it is
                 peek = self.peek()
                 combined = f"End {peek.value}".lower()
                 
-                # Check matches
-                found_match = False
+                # Check if it matches an expected marker
                 for marker in end_markers:
                     if marker.lower() == combined:
-                        return nodes # Stop parsing block, don't consume markers here
-                    if marker.lower() == 'end': # Naked End
-                         # But wait, End Sub shouldn't match End if End Sub is expected
+                        return nodes
+                    if marker.lower() == 'end': # Naked End (e.g. End Select vs End) - unlikely for blocks except maybe Sub
                          pass
-                
-                # Specific logic:
-                # If we expect "End With", and we see "End With", return.
-                # If we expect "End Sub", and we see "End Sub", return.
-            
-            # Handling "End With" vs "End Sub"
-            if self.match('IDENTIFIER', 'End'):
-                peek = self.current_token # because match advanced? No, match does NOT advance if false. But check manual.
-                # match returns True/False.
-                # Actually, I need to check WITHOUT consuming to know if I should stop.
-                
-                # Re-implement robust check
-                current_val = self.current_token.value.lower()
-                next_val = self.peek().value.lower()
-                
-                if current_val == 'end':
-                     combined = f"end {next_val}"
-                     # Check if combined matches any marker
-                     for m in end_markers:
-                         if m.lower() == combined:
-                             return nodes
-            
+
+            # Also check for intermediate markers (Else, ElseIf, Loop, Next) provided in end_markers
+            # For "Next", it might be "Next i", so we need to be careful.
+            if self.current_token.type == 'IDENTIFIER':
+                val = self.current_token.value.lower()
+                # Check directly if the current token matches a marker (e.g. "Loop", "Next", "Else")
+                for marker in end_markers:
+                    if marker.lower().split()[0] == val:
+                         # Potential match. 
+                         # If marker is "Next", and we have "Next i", it's a match.
+                         # If marker is "Else", and we have "Else", it's a match.
+                         return nodes
+
+                # VALIDATION: Check for unexpected block terminators
+                if val in ('next', 'loop', 'else', 'elseif', 'wend'):
+                    # Found a block keyword that was NOT in end_markers -> Unexpected
+                    print(f"{self.filename}:{self.current_token.line}: Syntax Error: Unexpected '{self.current_token.value}'")
+                    # We consume it to avoid infinite loop, but it's an error
+                    self.consume_statement()
+                    continue
+
+                if val == 'end':
+                    peek_val = self.peek().value.lower()
+                    if peek_val in ('if', 'select', 'with', 'function', 'sub', 'property'):
+                        # Found End X that was NOT in end_markers -> Unexpected
+                        print(f"{self.filename}:{self.current_token.line}: Syntax Error: Unexpected 'End {self.peek().value}'")
+                        self.advance() # End
+                        self.advance() # X
+                        self.consume_statement()
+                        continue
+
             # Parse Statements
             if self.match('IDENTIFIER', 'With'):
-                # With Block
-                self.consume('IDENTIFIER', 'With')
-                expr_tokens = []
-                while self.current_token.type not in ('NEWLINE', 'EOF'):
-                    expr_tokens.append(self.current_token)
-                    self.advance()
-                self.consume_statement()
-                
-                body = self.parse_block(end_markers=["End With"])
-                nodes.append(WithNode(expr_tokens, body))
-                
-                # Consume End With
-                if self.match('IDENTIFIER', 'End') and self.peek().value.lower() == 'with':
-                    self.advance() # End
-                    self.advance() # With
-                    self.consume_statement()
+                nodes.append(self.parse_with())
             
+            elif self.match('IDENTIFIER', 'If'):
+                stmt = self.parse_if_stmt()
+                if stmt: nodes.append(stmt)
+            
+            elif self.match('IDENTIFIER', 'For'):
+                nodes.append(self.parse_for())
+            
+            elif self.match('IDENTIFIER', 'Do'):
+                nodes.append(self.parse_do())
+                
+            elif self.match('IDENTIFIER', 'Select'):
+                nodes.append(self.parse_select())
+
+            elif self.match('IDENTIFIER', 'While'):
+                 nodes.append(self.parse_while())
+
             elif self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Static'):
-                # Local Decl - parse normally but store?
-                # For now, consume as statement tokens?
-                # Or better: Extract locals here?
-                # My ProcedureNode used to have .locals.
-                # Now it needs to extract them from the body or I parse them here.
-                # Let's parse them here and attach to a "DimNode" or just StatementNode?
-                # The Analyzer will need to process Dim statements to add to scope.
-                # I'll stick to StatementNode for Dim, but Analyzer must handle it.
                 stmt = self.collect_statement()
                 nodes.append(StatementNode(stmt))
                 
@@ -426,13 +417,190 @@ class VBAParser:
                 if stmt:
                     nodes.append(StatementNode(stmt))
                 else:
-                    # Could be empty line
                     if self.current_token.type == 'NEWLINE':
                         self.advance()
 
         return nodes
 
-    def collect_statement(self):
+    def parse_while(self):
+        self.consume('IDENTIFIER', 'While')
+        condition_tokens = self.collect_statement()  # Everything until newline
+        
+        body = self.parse_block(end_markers=["Wend"])
+        
+        self.consume('IDENTIFIER', 'Wend')
+        self.consume_statement()
+        
+        return StatementNode(condition_tokens) # Placeholder for WhileNode
+
+    def parse_with(self):
+        self.consume('IDENTIFIER', 'With')
+        expr_tokens = []
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            expr_tokens.append(self.current_token)
+            self.advance()
+        self.consume_statement()
+        
+        body = self.parse_block(end_markers=["End With"])
+        
+        self.consume('IDENTIFIER', 'End')
+        self.consume('IDENTIFIER', 'With')
+        self.consume_statement()
+        
+        return WithNode(expr_tokens, body)
+
+    def parse_if_stmt(self):
+        # If <condition> Then <newline> [Block]
+        # If <condition> Then <statement> [Else <statement>] [newline] [Single Line]
+        
+        self.consume('IDENTIFIER', 'If')
+        
+        # Scavenge tokens until 'Then'
+        condition_tokens = []
+        while self.current_token.type != 'EOF':
+            if self.match('IDENTIFIER', 'Then'):
+                break
+            condition_tokens.append(self.current_token)
+            self.advance()
+            
+        if not self.match('IDENTIFIER', 'Then'):
+             # Syntax Error: Missing Then
+             print(f"Syntax Error: Missing 'Then' at line {self.current_token.line}")
+             self.consume_statement() # Recover
+             return None
+             
+        self.consume('IDENTIFIER', 'Then')
+        
+        # Check for single line vs block
+        if self.current_token.type == 'NEWLINE' or self.current_token.type == 'COMMENT':
+             # Block If
+             self.consume_statement()
+             
+             # Parse True Block
+             # We stop at Else, ElseIf, or End If
+             true_block = self.parse_block(end_markers=["Else", "ElseIf", "End If"])
+             
+             false_block = []
+             
+             while True:
+                 tok = self.current_token
+                 if tok.type == 'IDENTIFIER':
+                     val = tok.value.lower()
+                     
+                     if val == 'elseif':
+                         self.advance()
+                         # Parse condition Then
+                         while not self.match('IDENTIFIER', 'Then') and self.current_token.type != 'EOF':
+                             self.advance()
+                         self.consume('IDENTIFIER', 'Then')
+                         self.consume_statement()
+                         
+                         block = self.parse_block(end_markers=["Else", "ElseIf", "End If"])
+                     
+                     elif val == 'else':
+                         self.advance()
+                         self.consume_statement()
+                         false_block = self.parse_block(end_markers=["End If"])
+                         # Do not break here. Let loop consume End If.
+                         pass
+                     
+                     elif val == 'end':
+                         peek = self.peek()
+                         if peek.value.lower() == 'if':
+                             self.advance() # End
+                             self.advance() # If
+                             self.consume_statement()
+                         break
+                     
+                     else:
+                         break
+                 else:
+                     break
+             
+             return StatementNode(condition_tokens) # Placeholder
+             
+        else:
+             # Single Line If
+             # Parse until Newline
+             # We must consume ALL statements on this line, including those separated by colons.
+             condition_tokens.extend(self.collect_statement(consume_newline=False))
+             
+             while self.current_token.type != 'NEWLINE' and self.current_token.type != 'EOF':
+                 # Loop for chained statements `If ... Then ... : ...`
+                 
+                 # The previous collect_statement(consume_newline=False) either stopped at ':' (consumed) or NEWLINE (not consumed).
+                 # If it stopped at ':', self.current_token is the next statement's start.
+                 # If it stopped at NEWLINE, we wouldn't be in this loop (due to while condition).
+                 
+                 # So we simply collect the next statement.
+                 stmt_tokens = self.collect_statement(consume_newline=False)
+                 condition_tokens.extend(stmt_tokens)
+             
+             # Consume the final newline
+             if self.match('NEWLINE'):
+                 self.advance()
+
+
+
+    def parse_for(self):
+        self.consume('IDENTIFIER', 'For')
+        # ... = ... To ...
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            self.advance()
+        self.consume_statement()
+        
+        body = self.parse_block(end_markers=["Next"])
+        
+        self.consume('IDENTIFIER', 'Next')
+        # Optional variable
+        if self.current_token.type == 'IDENTIFIER':
+            self.advance()
+        self.consume_statement()
+        
+        return StatementNode([]) # Placeholder
+
+    def parse_do(self):
+        self.consume('IDENTIFIER', 'Do')
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+             self.advance()
+        self.consume_statement()
+        
+        body = self.parse_block(end_markers=["Loop"])
+        
+        self.consume('IDENTIFIER', 'Loop')
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+             self.advance()
+        self.consume_statement()
+        
+        return StatementNode([])
+
+    def parse_select(self):
+        self.consume('IDENTIFIER', 'Select')
+        self.consume('IDENTIFIER', 'Case')
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            self.advance()
+        self.consume_statement()
+        
+        # Select block ends with End Select
+        # Inside we have Case ...
+        # But parse_block effectively handles the content. 
+        # We just need to stop at End Select.
+        # But wait, 'Case' is a separator?
+        # A simple block parse works if we consider Case as statements inside the block?
+        # OR we can treat it like If/ElseIf.
+        # For simple nesting check, just parsing until End Select is enough, 
+        # as long as we don't error on Case statements. 
+        # Case statements will be picked up as normal statements.
+        
+        body = self.parse_block(end_markers=["End Select"])
+        
+        self.consume('IDENTIFIER', 'End')
+        self.consume('IDENTIFIER', 'Select')
+        self.consume_statement()
+        
+        return StatementNode([])
+
+    def collect_statement(self, consume_newline=True):
         tokens = []
         while self.current_token.type != 'NEWLINE' and self.current_token.type != 'EOF':
              tokens.append(self.current_token)
@@ -444,7 +612,7 @@ class VBAParser:
                  return tokens
 
              self.advance()
-        if self.current_token.type == 'NEWLINE':
+        if consume_newline and self.current_token.type == 'NEWLINE':
             self.advance()
         return tokens
 

@@ -35,12 +35,17 @@ def main():
         print(Fore.RED + f"Error: Input folder '{args.input_folder}' does not exist.")
         sys.exit(1)
 
-    files = [f for f in os.listdir(args.input_folder) if f.lower().endswith(('.cls', '.bas', '.frm'))]
-    print(Fore.CYAN + f"Found {len(files)} VBA files in {args.input_folder}")
+    files = []
+    for root, _, filenames in os.walk(args.input_folder):
+        for f in filenames:
+            if f.lower().endswith(('.cls', '.bas', '.frm')):
+                files.append(os.path.join(root, f))
+                
+    print(Fore.CYAN + f"Found {len(files)} VBA files in {args.input_folder} and subdirectories")
 
     # 3. Processing Loop
-    for filename in files:
-        filepath = os.path.join(args.input_folder, filename)
+    for filepath in files:
+        filename = os.path.relpath(filepath, args.input_folder)
         try:
             with open(filepath, 'r', encoding='latin-1') as f: # VBA export is often latin-1 or cp1252
                 content = f.read()
@@ -81,7 +86,7 @@ def main():
             processed_tokens = list(pp.process())
             
             # Parser
-            parser = VBAParser(processed_tokens)
+            parser = VBAParser(processed_tokens, filename=filename)
             module_node = parser.parse_module()
             module_node.filename = filename
             module_node.module_type = module_type
