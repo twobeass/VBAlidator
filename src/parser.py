@@ -122,13 +122,44 @@ class VBAParser:
                 self.parse_attribute(module)
             elif self.match('IDENTIFIER', 'Option'):
                 self.consume()
-                self.consume_statement() 
-            elif self.match('IDENTIFIER', 'Public') or self.match('IDENTIFIER', 'Private') or self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Const') or self.match('IDENTIFIER', 'Global'):
+                self.consume_statement()
+            elif self.match('IDENTIFIER', 'Implements'):
+                self.consume()
+                self.consume_statement()
+            elif self.current_token.type == 'IDENTIFIER' and self.current_token.value.lower().startswith('def'):
+                # Handle DefInt, DefBool, etc.
+                self.consume()
+                self.consume_statement()
+            elif self.match('IDENTIFIER', 'Public') or self.match('IDENTIFIER', 'Private') or self.match('IDENTIFIER', 'Friend') or self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Const') or self.match('IDENTIFIER', 'Global'):
                 self.parse_declaration(module)
             elif self.match('IDENTIFIER', 'Sub') or self.match('IDENTIFIER', 'Function') or self.match('IDENTIFIER', 'Property'):
                 self.procedures_parse(module, 'Public') 
             elif self.match('IDENTIFIER', 'Type'):
                 self.parse_udt(module)
+            elif self.match('IDENTIFIER', 'Event'):
+                # Handle implicit public Event
+                # Reuse parse_declaration logic or duplicate event parsing?
+                # parse_declaration expects current_token to be scope.
+                # Here we already consumed 'Event' if we use match? No match doesn't consume if successful?
+                # match returns True but does NOT consume unless I call advance?
+                # Wait, match method:
+                # if type_name and self.current_token.type != type_name: return False
+                # return True (Does NOT advance)
+
+                # So if I match Event, current token is Event.
+                # I can manually parse it here.
+                self.consume() # Event
+                event_name = "Unknown"
+                if self.current_token.type == 'IDENTIFIER':
+                    event_name = self.current_token.value
+                    self.advance()
+
+                proc = ProcedureNode(event_name, 'Event', scope='Public')
+                if self.match('OPERATOR', '('):
+                    self.parse_arg_list(proc)
+                self.consume_statement()
+                module.procedures.append(proc)
+
             elif self.match('IDENTIFIER', 'Enum'):
                 self.parse_enum(module, 'Public')
             elif self.match('NEWLINE'):
@@ -175,6 +206,24 @@ class VBAParser:
         scope = self.current_token.value # Public, Private, Dim
         self.advance()
         
+        # Handle Event
+        # [Public|Private|Friend] Event Name(...)
+        if self.match('IDENTIFIER', 'Event'):
+            self.advance()
+            event_name = "Unknown"
+            if self.current_token.type == 'IDENTIFIER':
+                event_name = self.current_token.value
+                self.advance()
+
+            proc = ProcedureNode(event_name, 'Event', scope=scope)
+
+            if self.match('OPERATOR', '('):
+                self.parse_arg_list(proc)
+
+            self.consume_statement()
+            module.procedures.append(proc)
+            return
+
         # Handle Declare
         # [Public|Private] Declare [PtrSafe] Sub/Function ...
         if self.match('IDENTIFIER', 'Declare'):
@@ -244,7 +293,7 @@ class VBAParser:
             return
 
         # Check if Const
-        if scope.lower() in ('public', 'private', 'global'):
+        if scope.lower() in ('public', 'private', 'global', 'friend'):
              if self.match('IDENTIFIER', 'Const'):
                  self.advance()
         
