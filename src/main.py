@@ -25,8 +25,16 @@ def main():
     config = Config()
     if args.define:
         config.parse_defines(args.define)
-    if args.model:
-        config.load_model(args.model)
+
+    try:
+        if args.model:
+            config.load_model(args.model)
+        elif os.path.exists("vba_model.json"):
+            print(Fore.CYAN + "Loading implicit model: vba_model.json")
+            config.load_model("vba_model.json")
+    except Exception as e:
+        print(Fore.RED + f"Error loading model: {e}")
+        sys.exit(1)
 
     analyzer = Analyzer(config)
     

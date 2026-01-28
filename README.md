@@ -21,10 +21,11 @@
     cd VBAlidator
     ```
 
-2.  **Install dependencies:**
+2.  **Install the package:**
     ```bash
-    pip install -r requirements.txt
+    pip install .
     ```
+    This will install the dependencies and the `vbalidator` command-line tool.
 
 ## 🛠️ Quick Start
 
@@ -34,8 +35,14 @@ To validate host-specific code (e.g., `Visio.Shape`), you first need a model of 
 2. Run the generator: `python tools/generate_model.py`.
 
 ### 2. Run the Validator
+If you have a `vba_model.json` in your current directory, it will be automatically used.
 ```bash
-python -m src.main ./path/to/vba_code --model vba_model.json
+vbalidator ./path/to/vba_code
+```
+
+You can also specify the model manually:
+```bash
+vbalidator ./path/to/vba_code --model /path/to/vba_model.json
 ```
 
 ## 📚 Documentation
@@ -49,12 +56,12 @@ Detailed documentation is available in the `docs/` folder:
 ## 🧪 Testing
 
 ```bash
-python -m src.main tests/samples/valid_code
+vbalidator tests/samples/valid_code
 ```
 
 To see the tool in action against intentional errors, check the `tests/demo` folder:
 ```bash
-python -m src.main tests/demo
+vbalidator tests/demo
 ```
 
 ## 📄 License
