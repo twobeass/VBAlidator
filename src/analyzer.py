@@ -65,23 +65,23 @@ class Analyzer:
 
             if mod.module_type == 'Module':
                 for var in mod.variables:
-                    if var.scope.lower() in ('public', 'global'):
+                    if var.scope.lower() in ('public', 'global', 'friend'):
                         self.global_scope.define(var.name, var.type_name, 'Variable')
                 
                 for proc in mod.procedures:
-                    if proc.scope.lower() == 'public':
+                    if proc.scope.lower() in ('public', 'friend'):
                          self.global_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
                 
                 # Register Public Types
                 for type_name, udt in mod.types.items():
-                    if udt.scope.lower() == 'public':
+                    if udt.scope.lower() in ('public', 'friend'):
                         self.global_scope.define(type_name, type_name, 'Type')
                         self.udts[type_name.lower()] = udt
 
             else:
                 self.global_scope.define(mod.name, mod.name, 'Class')
                 for type_name, udt in mod.types.items():
-                     if udt.scope.lower() == 'public':
+                     if udt.scope.lower() in ('public', 'friend'):
                          self.global_scope.define(type_name, type_name, 'Type')
                          self.udts[type_name.lower()] = udt
 
@@ -323,7 +323,9 @@ class Analyzer:
             'byte', 'long', 'single', 'double', 'currency', 'date', 'decimal',
             'and', 'or', 'xor', 'is', 'like', 'typeof', 'mod', 'new', 'print',
             'open', 'close', 'input', 'output', 'append', 'binary', 'random',
-            'get', 'put', 'let', 'stop', 'len', 'mid', 'redim', 'preserve', 'erase'
+            'get', 'put', 'let', 'stop', 'len', 'mid', 'redim', 'preserve', 'erase',
+            'friend', 'event', 'implements', 'raiseevent', 'gosub', 'return',
+            'lset', 'rset', 'addressof'
         }
 
         i = 0
@@ -381,7 +383,7 @@ class Analyzer:
                         last_resolved_kind = None
                         continue
 
-                if prev_keyword in ('goto', 'resume'):
+                if prev_keyword in ('goto', 'resume', 'gosub'):
                     prev_keyword = None
                     i += 1
                     continue
@@ -643,20 +645,20 @@ class Analyzer:
         for mod in self.modules:
             if mod.module_type == 'Module' and mod.name.lower() == type_name.lower():
                 for v in mod.variables:
-                    if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global'):
+                    if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
                         return v.type_name
                 for p in mod.procedures:
-                    if p.name.lower() == member_name.lower() and p.scope.lower() == 'public':
+                    if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
                          return p.return_type
         
         # 3. Check Project Classes
         for mod in self.modules:
             if mod.module_type in ('Class', 'Form') and mod.name.lower() == type_name.lower():
                  for v in mod.variables:
-                     if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global'):
+                     if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
                          return v.type_name
                  for p in mod.procedures:
-                     if p.name.lower() == member_name.lower() and p.scope.lower() == 'public':
+                     if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
                          return p.return_type
                  
                  # FALLBACK: If it's a Form, check the 'UserForm' class definition (from config)
