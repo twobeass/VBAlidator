@@ -100,46 +100,50 @@ def generate_model():
 
                                 # Extract Arguments
                                 args_info = []
-                                # Check if args are present in the tuple
-                                # comtypes format: (['flags'], 'Return', 'Name', (['in', 'opt'], 'Type', 'ArgName'), ...)
-                                # So indices starting from 3 might be args
-                                if len(m) > 3:
-                                    for i in range(3, len(m)):
-                                        arg_def = m[i]
-                                        if isinstance(arg_def, tuple) and len(arg_def) >= 3:
-                                            # (['in'], 'Type', 'ArgName')
-                                            flags = arg_def[0]
-                                            a_type = str(arg_def[1]) # Need mapping or raw string
-                                            a_name = str(arg_def[2])
+                                try:
+                                    # Check if args are present in the tuple
+                                    # comtypes format: (['flags'], 'Return', 'Name', (['in', 'opt'], 'Type', 'ArgName'), ...)
+                                    # So indices starting from 3 might be args
+                                    if len(m) > 3:
+                                        for i in range(3, len(m)):
+                                            arg_def = m[i]
+                                            # Validate arg_def structure
+                                            if isinstance(arg_def, tuple) and len(arg_def) >= 3:
+                                                # (['in'], 'Type', 'ArgName')
+                                                flags = arg_def[0]
+                                                # Ensure flags is list/tuple
+                                                if not isinstance(flags, (list, tuple)):
+                                                    continue
 
-                                            mechanism = 'ByVal'
-                                            if 'out' in flags: mechanism = 'ByRef' # COM out/inout is often ByRef
-                                            if 'in' not in flags and 'out' not in flags: mechanism = 'ByRef' # Default?
-                                            # Actually COM 'in' is ByVal usually, unless it is a pointer.
-                                            # But in VBA context, objects are ByRef pointers but treated as ByVal references?
-                                            # Let's assume standard behavior: 'in' = ByRef if pointer, else ByVal.
-                                            # But without pointer info, hard to say.
-                                            # Safe default for check: 'ByRef' matches strict, 'ByVal' matches loose.
-                                            # If we mark as ByRef, we enforce strictness.
+                                                a_type = "Variant"
+                                                try:
+                                                    a_type = str(arg_def[1])
+                                                    if hasattr(arg_def[1], '__name__'):
+                                                         a_type = arg_def[1].__name__
+                                                except:
+                                                    a_type = "Variant"
 
-                                            # Simple heuristic for now:
-                                            # If flags has 'out' -> ByRef
-                                            # Else -> ByRef (Standard VBA default) or ByVal?
-                                            # Most COM methods in VBA take arguments ByVal unless specified.
+                                                a_name = "Unknown"
+                                                try:
+                                                    a_name = str(arg_def[2])
+                                                except:
+                                                    pass
 
-                                            is_optional = 'opt' in flags
+                                                mechanism = 'ByVal'
+                                                if 'out' in flags: mechanism = 'ByRef'
+                                                if 'in' not in flags and 'out' not in flags: mechanism = 'ByRef'
 
-                                            # Type cleaning
-                                            # comtypes types might be <class 'comtypes.gen...'>
-                                            if hasattr(arg_def[1], '__name__'):
-                                                 a_type = arg_def[1].__name__
+                                                is_optional = 'opt' in flags
 
-                                            args_info.append({
-                                                "name": a_name,
-                                                "type": a_type, # This needs mapping to VBA types
-                                                "mechanism": mechanism,
-                                                "is_optional": is_optional
-                                            })
+                                                args_info.append({
+                                                    "name": a_name,
+                                                    "type": a_type,
+                                                    "mechanism": mechanism,
+                                                    "is_optional": is_optional
+                                                })
+                                except Exception as e:
+                                    print(f"    Warning: Error extracting args for {clean_name}: {e}")
+                                    # Don't fail the member registration!
 
                                 member_def = {"type": "Variant"}
                                 if args_info:
