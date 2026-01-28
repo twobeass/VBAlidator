@@ -80,6 +80,9 @@ def generate_model():
                         
                         for m in all_methods:
                             m_name = None
+                            # m structure often: (['propget'], 'Name', 'Name', ...) or (['id'], 'Func', 'Func', ...)
+                            # args usually in m[-1] or m[-2] if provided by comtypes
+
                             if len(m) >= 3:
                                 candidate = m[2]
                                 if isinstance(candidate, str):
@@ -94,12 +97,61 @@ def generate_model():
                                 if clean_name.startswith("_get_"): clean_name = clean_name[5:]
                                 elif clean_name.startswith("_set_"): clean_name = clean_name[5:]
                                 elif clean_name.startswith("_put_"): clean_name = clean_name[5:]
+
+                                # Extract Arguments
+                                args_info = []
+                                # Check if args are present in the tuple
+                                # comtypes format: (['flags'], 'Return', 'Name', (['in', 'opt'], 'Type', 'ArgName'), ...)
+                                # So indices starting from 3 might be args
+                                if len(m) > 3:
+                                    for i in range(3, len(m)):
+                                        arg_def = m[i]
+                                        if isinstance(arg_def, tuple) and len(arg_def) >= 3:
+                                            # (['in'], 'Type', 'ArgName')
+                                            flags = arg_def[0]
+                                            a_type = str(arg_def[1]) # Need mapping or raw string
+                                            a_name = str(arg_def[2])
+
+                                            mechanism = 'ByVal'
+                                            if 'out' in flags: mechanism = 'ByRef' # COM out/inout is often ByRef
+                                            if 'in' not in flags and 'out' not in flags: mechanism = 'ByRef' # Default?
+                                            # Actually COM 'in' is ByVal usually, unless it is a pointer.
+                                            # But in VBA context, objects are ByRef pointers but treated as ByVal references?
+                                            # Let's assume standard behavior: 'in' = ByRef if pointer, else ByVal.
+                                            # But without pointer info, hard to say.
+                                            # Safe default for check: 'ByRef' matches strict, 'ByVal' matches loose.
+                                            # If we mark as ByRef, we enforce strictness.
+
+                                            # Simple heuristic for now:
+                                            # If flags has 'out' -> ByRef
+                                            # Else -> ByRef (Standard VBA default) or ByVal?
+                                            # Most COM methods in VBA take arguments ByVal unless specified.
+
+                                            is_optional = 'opt' in flags
+
+                                            # Type cleaning
+                                            # comtypes types might be <class 'comtypes.gen...'>
+                                            if hasattr(arg_def[1], '__name__'):
+                                                 a_type = arg_def[1].__name__
+
+                                            args_info.append({
+                                                "name": a_name,
+                                                "type": a_type, # This needs mapping to VBA types
+                                                "mechanism": mechanism,
+                                                "is_optional": is_optional
+                                            })
+
+                                member_def = {"type": "Variant"}
+                                if args_info:
+                                    member_def["args"] = args_info
+                                    member_def["min_args"] = len([a for a in args_info if not a['is_optional']])
+                                    member_def["max_args"] = len(args_info)
                                     
-                                model["classes"][type_name]["members"][clean_name] = {"type": "Variant"}
+                                model["classes"][type_name]["members"][clean_name] = member_def
 
                                 # Global Promotion
                                 if name == "VBA" and not clean_name.startswith("_"):
-                                    model["globals"][clean_name] = {"type": "Variant"}
+                                    model["globals"][clean_name] = member_def
                     
                     # 2. Enums and Constants Containers
                     
