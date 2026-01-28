@@ -325,7 +325,9 @@ class Analyzer:
             'open', 'close', 'input', 'output', 'append', 'binary', 'random',
             'get', 'put', 'let', 'stop', 'len', 'mid', 'redim', 'preserve', 'erase',
             'friend', 'event', 'implements', 'raiseevent', 'gosub', 'return',
-            'lset', 'rset', 'addressof'
+            'lset', 'rset', 'addressof',
+            'defbool', 'defbyte', 'defint', 'deflong', 'defcur', 'defsng',
+            'defdbl', 'defdec', 'defdate', 'defstr', 'defobj', 'defvar'
         }
 
         i = 0

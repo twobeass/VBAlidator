@@ -49,7 +49,12 @@ Detailed documentation is available in the `docs/` folder:
 ## 🧪 Testing
 
 ```bash
-python -m src.main tests/vba_code
+python -m src.main tests/samples/valid_code
+```
+
+To see the tool in action against intentional errors, check the `tests/demo` folder:
+```bash
+python -m src.main tests/demo
 ```
 
 ## 📄 License
