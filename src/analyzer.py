@@ -312,6 +312,10 @@ class Analyzer:
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
 
     def analyze_statement(self, tokens, scope, filename, context, with_stack, report_errors=True):
+        type_name, _, _ = self.analyze_expression_info(tokens, scope, filename, context, with_stack, report_errors=report_errors)
+        return type_name
+
+    def analyze_expression_info(self, tokens, scope, filename, context, with_stack, report_errors=True):
         KEYWORDS = {
             'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit', 
             'on', 'error', 'goto', 'resume', 'do', 'loop', 'while', 'wend', 
@@ -351,11 +355,11 @@ class Analyzer:
                  if is_arg_start:
                       arg_tokens = tokens[i:]
                       if report_errors and last_resolved_symbol:
-                           self.validate_signature(last_resolved_name, last_resolved_symbol, arg_tokens, filename, token.line, context)
+                           self.validate_signature(last_resolved_name, last_resolved_symbol, arg_tokens, filename, token.line, context, scope, with_stack)
 
                       args = self.split_args(arg_tokens)
                       for arg in args:
-                          self.analyze_statement(arg, scope, filename, context, with_stack, report_errors=report_errors)
+                          self.analyze_expression_info(arg, scope, filename, context, with_stack, report_errors=report_errors)
                       break
 
             if token.type == 'IDENTIFIER':
@@ -391,7 +395,7 @@ class Analyzer:
                     continue
 
                 if expect_member and last_resolved_type:
-                    member_type = self.resolve_member(last_resolved_type, name)
+                    member_type, member_kind = self.resolve_member(last_resolved_type, name) or (None, None)
                     if not member_type:
                         if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
                             if report_errors:
@@ -401,7 +405,9 @@ class Analyzer:
                                     "message": f"Member '{name}' not found in type '{last_resolved_type}' inside '{context}'."
                                 })
                     last_resolved_type = member_type or 'Unknown'
-                    last_resolved_kind = 'Unknown' # Member kind resolution not yet implemented
+                    # Propagate Kind if possible, or assume Unknown
+                    # If resolved to a Variable member, it's a Variable.
+                    last_resolved_kind = member_kind or 'Unknown'
                     last_resolved_symbol = None # Members are not scope symbols
                     expect_member = False
                 else:
@@ -449,7 +455,9 @@ class Analyzer:
                     if last_resolved_type is None:
                         if with_stack:
                             last_resolved_type = with_stack[-1]
-                            last_resolved_kind = 'Unknown'
+                            # Assume With object is a variable reference?
+                            # Usually yes (Reference to object).
+                            last_resolved_kind = 'Variable'
                         else:
                             if report_errors:
                                 self.errors.append({
@@ -501,33 +509,40 @@ class Analyzer:
 
                     # Hook for Signature Validation
                     if report_errors and last_resolved_symbol:
-                            self.validate_signature(last_resolved_name, last_resolved_symbol, sub_tokens, filename, token.line, context)
+                            self.validate_signature(last_resolved_name, last_resolved_symbol, sub_tokens, filename, token.line, context, scope, with_stack)
 
                     if sub_tokens:
-                        inner_type = self.analyze_statement(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors)
+                        # Inner expression analysis
+                        inner_type, _, _ = self.analyze_expression_info(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors)
                     
                     # Determine result type
                     if last_resolved_type is None:
                         # Grouping (Expression)
                         last_resolved_type = inner_type
-                        last_resolved_kind = 'Unknown'
+                        last_resolved_kind = 'Expression' # Grouping is always an Expression
                     else:
                         # Function/Array Call
                         if inferred_ret_type:
                             last_resolved_type = inferred_ret_type
+                            last_resolved_kind = 'Expression'
                         elif last_resolved_type.endswith('()'):
                              last_resolved_type = last_resolved_type[:-2]
-                        
+                             # Array Element Access -> Preserves Variable-ness if base was Variable
+                             if last_resolved_kind == 'Variable':
+                                 last_resolved_kind = 'Variable'
+                             else:
+                                 last_resolved_kind = 'Expression'
                         else:
                             # Default Property Logic (e.g. Selection(1) -> Selection.Item(1))
                             # If the type is an object and has an "Item" member, resolve to that type.
-                            item_type = self.resolve_member(last_resolved_type, 'Item')
+                            item_type, item_kind = self.resolve_member(last_resolved_type, 'Item') or (None, None)
                             if item_type:
                                 last_resolved_type = item_type
-                            # Otherwise, we keep the original type (it might be a function return type)
+                                last_resolved_kind = item_kind or 'Unknown'
+                            else:
+                                # Fallback or error
+                                last_resolved_kind = 'Unknown'
 
-                        last_resolved_kind = 'Unknown'
-                        
                     expect_member = False
                 else:
                     last_resolved_type = None
@@ -539,7 +554,7 @@ class Analyzer:
             
             elif token.type in ('STRING', 'INTEGER', 'FLOAT'):
                 last_resolved_type = None
-                last_resolved_kind = None
+                last_resolved_kind = 'Expression' # Literal
                 last_resolved_symbol = None
                 expect_member = False
                 prev_keyword = None
@@ -547,7 +562,7 @@ class Analyzer:
             else:
                 i += 1
         
-        return last_resolved_type
+        return last_resolved_type, last_resolved_kind, last_resolved_symbol
 
     def split_args(self, tokens):
         args = []
@@ -571,19 +586,24 @@ class Analyzer:
              args.append(current_arg)
         return args
 
-    def validate_signature(self, name, symbol, arg_tokens, filename, line, context):
+    def validate_signature(self, name, symbol, arg_tokens, filename, line, context, scope=None, with_stack=None):
         extra = symbol.get('extra')
         if not extra: return
+
+        if scope is None: scope = self.global_scope
+        if with_stack is None: with_stack = []
 
         args = self.split_args(arg_tokens)
         arg_count = len(args)
 
         min_args = 0
         max_args = 999
+        param_defs = []
 
         if isinstance(extra, ProcedureNode):
              min_args = 0
              max_args = len(extra.args)
+             param_defs = extra.args
              has_param_array = False
 
              for arg in extra.args:
@@ -598,6 +618,8 @@ class Analyzer:
         elif isinstance(extra, dict):
              min_args = extra.get('min_args', 0)
              max_args = extra.get('max_args', 999)
+             if 'args' in extra:
+                 param_defs = extra['args']
 
         if arg_count < min_args:
              self.errors.append({
@@ -611,6 +633,68 @@ class Analyzer:
                  "line": line,
                  "message": f"Argument count mismatch for '{name}': Expected at most {max_args}, got {arg_count}."
              })
+
+        # Check ByRef Type Mismatch
+        if param_defs:
+            for i, arg_tokens_list in enumerate(args):
+                if i >= len(param_defs):
+                    # Could be ParamArray. If last param is ParamArray, usage is valid.
+                    # We can check param_defs[-1].is_paramarray
+                    last_param = param_defs[-1]
+                    is_last_pa = False
+                    if isinstance(last_param, dict):
+                        is_last_pa = last_param.get('is_paramarray', False)
+                    else:
+                        is_last_pa = getattr(last_param, 'is_paramarray', False)
+
+                    if is_last_pa:
+                        continue
+                    break
+
+                param = param_defs[i]
+
+                # Check for ParamArray
+                is_pa = False
+                if isinstance(param, dict):
+                    is_pa = param.get('is_paramarray', False)
+                else:
+                    is_pa = getattr(param, 'is_paramarray', False)
+
+                if is_pa: continue
+
+                # Analyze Argument
+                arg_type, arg_kind, _ = self.analyze_expression_info(arg_tokens_list, scope, filename, context, with_stack, report_errors=False)
+
+                # Get Param Info
+                mech = 'ByRef'
+                param_type = 'Variant'
+                param_name = 'Unknown'
+
+                if isinstance(param, dict):
+                    mech = param.get('mechanism', 'ByRef')
+                    param_type = param.get('type', 'Variant')
+                    param_name = param.get('name', 'Unknown')
+                else:
+                    mech = getattr(param, 'mechanism', 'ByRef')
+                    param_type = param.type_name
+                    param_name = param.name
+
+                if mech == 'ByRef':
+                    # Only check if argument is a Variable (L-Value)
+                    if arg_kind == 'Variable':
+                         # Allow Variant to accept any type
+                         if param_type.lower() == 'variant':
+                             continue
+
+                         # Strict Type Equality
+                         # Ignore if types are Unknown
+                         if param_type != 'Unknown' and arg_type != 'Unknown':
+                             if param_type.lower() != arg_type.lower():
+                                 self.errors.append({
+                                     "file": filename,
+                                     "line": line,
+                                     "message": f"ByRef argument type mismatch. Parameter '{param_name}' expects '{param_type}', but got variable of type '{arg_type}'."
+                                 })
 
     def resolve_member(self, type_name, member_name):
         return self._resolve_member_internal(type_name, member_name)
@@ -633,7 +717,7 @@ class Analyzer:
             udt = self.udts[type_name.lower()]
             for m in udt.members:
                 if m.name.lower() == member_name.lower():
-                    return m.type_name
+                    return m.type_name, 'Variable'
         
         # 1. Check Config Classes (Loaded from Model)
         cls_def = self.config.get_class(type_name)
@@ -641,27 +725,31 @@ class Analyzer:
             members = cls_def.get("members", {})
             for m_name, m_def in members.items():
                 if m_name.lower() == member_name.lower():
-                    return m_def.get("type", "Variant")
+                    t = m_def.get("type", "Variant")
+                    k = 'Expression'
+                    if t in ('Sub', 'Function', 'Property'):
+                        k = 'Procedure'
+                    return t, k
         
         # 2. Check Standard Modules
         for mod in self.modules:
             if mod.module_type == 'Module' and mod.name.lower() == type_name.lower():
                 for v in mod.variables:
                     if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
-                        return v.type_name
+                        return v.type_name, 'Variable'
                 for p in mod.procedures:
                     if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
-                         return p.return_type
+                         return p.return_type, 'Procedure'
         
         # 3. Check Project Classes
         for mod in self.modules:
             if mod.module_type in ('Class', 'Form') and mod.name.lower() == type_name.lower():
                  for v in mod.variables:
                      if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
-                         return v.type_name
+                         return v.type_name, 'Variable'
                  for p in mod.procedures:
                      if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
-                         return p.return_type
+                         return p.return_type, 'Procedure'
                  
                  # FALLBACK: If it's a Form, check the 'UserForm' class definition (from config)
                  if mod.module_type == 'Form':
@@ -670,11 +758,12 @@ class Analyzer:
                          members = userform_cls.get('members', {})
                          for m_name, m_def in members.items():
                              if m_name.lower() == member_name.lower():
-                                 return m_def.get('type', 'Variant')
+                                 t = m_def.get('type', 'Variant')
+                                 return t, 'Expression'
                      
                      # FALLBACK 2: Implicit Controls (e.g. Me.txtBox)
                      # Since we can't parse controls from .frm text, assume any other member is a control
-                     return 'Object'
+                     return 'Object', 'Variable'
                  
                  # FALLBACK: ThisDocument (Special project class that acts as a Document)
                  if mod.name.lower() == 'thisdocument':
@@ -683,7 +772,8 @@ class Analyzer:
                          members = doc_cls.get('members', {})
                          for m_name, m_def in members.items():
                              if m_name.lower() == member_name.lower():
-                                 return m_def.get('type', 'Variant')
+                                 t = m_def.get('type', 'Variant')
+                                 return t, 'Expression'
 
         return None
 
