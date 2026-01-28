@@ -22,15 +22,7 @@
     "Abs": { "type": "Function", "returns": "Double", "min_args": 1, "max_args": 1 },
     "StrPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
     "VarPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
-    "ObjPtr": {
-        "type": "Function",
-        "returns": "LongPtr",
-        "min_args": 1,
-        "max_args": 1,
-        "args": [
-            { "name": "Ptr", "type": "Object", "mechanism": "ByRef" }
-        ]
-    },
+    "ObjPtr": { "type": "Function", "returns": "LongPtr", "min_args": 1, "max_args": 1 },
     "vbNewLine": { "type": "String" },
     "vbCrLf": { "type": "String" },
     "vbCr": { "type": "String" },

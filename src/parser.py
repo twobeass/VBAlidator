@@ -4,16 +4,15 @@ class Node:
     pass
 
 class VariableNode(Node):
-    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False, mechanism='ByRef'):
+    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False):
         self.name = name
         self.type_name = type_name
         self.scope = scope # Dim (Local), Private, Public, Global
         self.is_optional = is_optional
         self.is_paramarray = is_paramarray
-        self.mechanism = mechanism
 
     def __repr__(self):
-        return f"Var({self.name} As {self.type_name} [{self.mechanism}])"
+        return f"Var({self.name} As {self.type_name})"
 
 class StatementNode(Node):
     def __init__(self, tokens):
@@ -671,16 +670,10 @@ class VBAParser:
         while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
             is_optional = False
             is_paramarray = False
-            mechanism = 'ByRef'
-
             while self.match('IDENTIFIER', 'Optional') or self.match('IDENTIFIER', 'ByVal') or self.match('IDENTIFIER', 'ByRef') or self.match('IDENTIFIER', 'ParamArray'):
                 val = self.current_token.value.lower()
                 if val == 'optional': is_optional = True
-                if val == 'paramarray':
-                    is_paramarray = True
-                    mechanism = 'ParamArray'
-                if val == 'byval': mechanism = 'ByVal'
-                if val == 'byref': mechanism = 'ByRef'
+                if val == 'paramarray': is_paramarray = True
                 self.advance()
             
             if self.current_token.type == 'IDENTIFIER':
@@ -717,7 +710,7 @@ class VBAParser:
                              break
                          self.advance()
 
-                proc.args.append(VariableNode(arg_name, arg_type, 'Local', is_optional=is_optional, is_paramarray=is_paramarray, mechanism=mechanism))
+                proc.args.append(VariableNode(arg_name, arg_type, 'Local', is_optional=is_optional, is_paramarray=is_paramarray))
             
             if self.match('OPERATOR', ','):
                 self.advance()
