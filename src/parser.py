@@ -146,16 +146,6 @@ class VBAParser:
                 self.parse_udt(module)
             elif self.match('IDENTIFIER', 'Event'):
                 # Handle implicit public Event
-                # Reuse parse_declaration logic or duplicate event parsing?
-                # parse_declaration expects current_token to be scope.
-                # Here we already consumed 'Event' if we use match? No match doesn't consume if successful?
-                # match returns True but does NOT consume unless I call advance?
-                # Wait, match method:
-                # if type_name and self.current_token.type != type_name: return False
-                # return True (Does NOT advance)
-
-                # So if I match Event, current token is Event.
-                # I can manually parse it here.
                 self.consume() # Event
                 event_name = "Unknown"
                 if self.current_token.type == 'IDENTIFIER':
@@ -643,15 +633,6 @@ class VBAParser:
         self.consume_statement()
         
         # Select block ends with End Select
-        # Inside we have Case ...
-        # But parse_block effectively handles the content. 
-        # We just need to stop at End Select.
-        # But wait, 'Case' is a separator?
-        # A simple block parse works if we consider Case as statements inside the block?
-        # OR we can treat it like If/ElseIf.
-        # For simple nesting check, just parsing until End Select is enough, 
-        # as long as we don't error on Case statements. 
-        # Case statements will be picked up as normal statements.
         
         body = self.parse_block(end_markers=["End Select"])
         
@@ -668,8 +649,8 @@ class VBAParser:
              
              # Check for statement separator ':'
              if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                 tokens.append(self.current_token) # Include colon for Label detection
                  self.advance()
-                 # Break statement here, but include the colon so analyzer can detect labels "Label:"
                  return tokens
 
              self.advance()
@@ -736,13 +717,7 @@ class VBAParser:
                     self.advance()
         self.consume('OPERATOR', ')')
 
-    def parse_udt(self, module, scope='Public'):
-        # NOTE: Caller (parse_module) consumes 'Type' BEFORE calling this? No.
-        # "elif self.match('IDENTIFIER', 'Type'): self.parse_udt(module)"
-        # But wait, inside parse_module, it checks current_token 'Type'.
-        # Inside parse_declaration, it checks current_token 'Type'.
-        # self.consume('IDENTIFIER', 'Type') needs to succeed.
-        
+    def parse_udt(self, module, scope='Public'):        
         self.consume('IDENTIFIER', 'Type')
         type_name = self.current_token.value
         self.advance()
@@ -794,10 +769,6 @@ class VBAParser:
 
         # Enums are basically Longs with named constants
         # We need to register the Enum Type AND the Enum Members as global/module constants
-
-        # Create a TypeNode to represent the Enum type itself?
-        # Or just store members?
-        # Analyzer needs to know EnumName is a valid Type.
         udt = TypeNode(enum_name, scope) # Reuse TypeNode for simplicity
 
         while self.current_token.type != 'EOF':
@@ -813,15 +784,7 @@ class VBAParser:
                 self.advance()
 
                 # Enum members are constants.
-                # We should register them in the module's constants/variables list?
-                # Or a specific Enum list?
-                # Analyzer expects module.types for types.
-                # For members, it checks variables/constants?
-
-                # Let's treat them as Public Constants for now.
-                # But we also want to support `Dim x As EnumName`.
-
-                # So we register the Enum Type in module.types
+                # We register the Enum Type in module.types
                 # AND we register the members as module-level variables (Consts)
 
                 var = VariableNode(member_name, 'Long', scope) # Enum members are Long

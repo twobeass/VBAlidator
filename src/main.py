@@ -70,15 +70,7 @@ def main():
             if ext == '.frm':
                 fp = FormParser()
                 controls = fp.parse(content)
-                # Form code usually starts after Attribute lines which are preserved in content?
-                # Actually, the parser handles Attributes.
-                # But .frm has a header before Attributes.
-                # We need to find where the "Attribute" section starts or just pass everything?
-                # The lexer might choke on "Begin ... End".
-                # Hack: Find the last "End" of the header.
-                # Or just regex replace the header out for the code parser.
-                # The FormParser already extracted controls.
-                # We strip the header for the VBAParser.
+                # Find where code attributes start to skip Form definition header
                 import re
                 # Find the start of Attributes
                 match = re.search(r'Attribute\s+VB_Name', content)
