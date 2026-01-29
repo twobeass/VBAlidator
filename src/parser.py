@@ -64,6 +64,13 @@ class ModuleNode(Node):
         self.procedures = []
         self.types = {} # User Defined Types
 
+class IfNode(Node):
+    def __init__(self, condition_tokens, true_block, else_blocks=None, else_block=None):
+        self.condition_tokens = condition_tokens
+        self.true_block = true_block
+        self.else_blocks = else_blocks if else_blocks else [] # List of (condition_tokens, block)
+        self.else_block = else_block
+
 class FormParser:
     """Parses the GUI definition block of .frm files."""
     def parse(self, content):
@@ -530,7 +537,8 @@ class VBAParser:
              # We stop at Else, ElseIf, or End If
              true_block = self.parse_block(end_markers=["Else", "ElseIf", "End If"])
              
-             false_block = []
+             else_blocks = []
+             else_block = None
              
              while True:
                  tok = self.current_token
@@ -540,17 +548,20 @@ class VBAParser:
                      if val == 'elseif':
                          self.advance()
                          # Parse condition Then
+                         elseif_cond = []
                          while not self.match('IDENTIFIER', 'Then') and self.current_token.type != 'EOF':
+                             elseif_cond.append(self.current_token)
                              self.advance()
                          self.consume('IDENTIFIER', 'Then')
                          self.consume_statement()
                          
                          block = self.parse_block(end_markers=["Else", "ElseIf", "End If"])
+                         else_blocks.append((elseif_cond, block))
                      
                      elif val == 'else':
                          self.advance()
                          self.consume_statement()
-                         false_block = self.parse_block(end_markers=["End If"])
+                         else_block = self.parse_block(end_markers=["End If"])
                          # Do not break here. Let loop consume End If.
                          pass
                      
@@ -567,7 +578,7 @@ class VBAParser:
                  else:
                      break
              
-             return StatementNode(condition_tokens) # Placeholder
+             return IfNode(condition_tokens, true_block, else_blocks, else_block)
              
         else:
              # Single Line If

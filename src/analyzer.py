@@ -1,4 +1,4 @@
-from .parser import VariableNode, ProcedureNode, WithNode, StatementNode
+from .parser import VariableNode, ProcedureNode, WithNode, StatementNode, IfNode
 
 class SymbolTable:
     def __init__(self, name, parent=None, scope_type='Block'):
@@ -164,6 +164,19 @@ class Analyzer:
 
                     if not is_conditional_jump:
                         unreachable = True
+            
+            elif isinstance(node, IfNode):
+                # Analyze Condition
+                self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
+                # Analyze True Block
+                self.analyze_block(node.true_block, scope, filename, context, with_stack)
+                # Analyze ElseIf Blocks
+                for cond_tokens, block in node.else_blocks:
+                     self.analyze_statement(cond_tokens, scope, filename, context, with_stack)
+                     self.analyze_block(block, scope, filename, context, with_stack)
+                # Analyze Else Block
+                if node.else_block:
+                     self.analyze_block(node.else_block, scope, filename, context, with_stack)
             
             elif isinstance(node, WithNode):
                 if unreachable:
@@ -352,6 +365,8 @@ class Analyzer:
         expect_member = False
         prev_keyword = None
         
+        implied_type = None
+
         while i < len(tokens):
             token = tokens[i]
             
@@ -371,6 +386,28 @@ class Analyzer:
                       for arg in args:
                           self.analyze_expression_info(arg, scope, filename, context, with_stack, report_errors=report_errors)
                       break
+            
+            if token.type == 'OPERATOR':
+                val = token.value.lower()
+                if val not in ('.', '!', '(', ')', ','):
+                    if val == '&':
+                        implied_type = 'String'
+                    elif val in ('=', '<>', '<', '>', '<=', '>=', 'like', 'is'):
+                         implied_type = 'Boolean'
+                    elif val in ('+', '-', '*', '/', '^', 'mod', '\\'):
+                         if last_resolved_type not in ('Integer', 'Long', 'Single', 'Double', 'Currency', 'Byte'):
+                              implied_type = 'Double'
+                         else:
+                              implied_type = last_resolved_type
+
+                    last_resolved_symbol = None
+                    last_resolved_name = None
+                    last_resolved_type = None
+                    last_resolved_kind = None
+                    expect_member = False
+                    prev_keyword = None
+                    i += 1
+                    continue
 
             if token.type == 'IDENTIFIER':
                 name = token.value
@@ -407,7 +444,9 @@ class Analyzer:
                 if expect_member and last_resolved_type:
                     member_type, member_kind = self.resolve_member(last_resolved_type, name) or (None, None)
                     if not member_type:
+                        # DEBUG
                         if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
+
                             if report_errors:
                                 self.errors.append({
                                     "file": filename,
@@ -450,6 +489,12 @@ class Analyzer:
                                         "line": token.line,
                                         "message": f"Undefined identifier '{name}' in '{context}'."
                                     })
+                                last_resolved_type = 'Unknown'
+                                last_resolved_kind = 'Unknown'
+                    if not sym:
+                        # ... (existing fallback logic)
+                        # ...
+                        # ...
                                 last_resolved_type = 'Unknown'
                                 last_resolved_kind = 'Unknown'
                     else:
@@ -562,6 +607,32 @@ class Analyzer:
                     prev_keyword = None
                     i += 1
             
+            elif token.type == 'OPERATOR':
+                val = token.value.lower()
+                if val == '&':
+                    last_resolved_type = 'String'
+                    last_resolved_kind = 'Expression'
+                elif val in ('=', '<>', '<', '>', '<=', '>=', 'like', 'is'):
+                    last_resolved_type = 'Boolean'
+                    last_resolved_kind = 'Expression'
+                elif val in ('+', '-', '*', '/', '^', 'mod', '\\'):
+                     # Preserve numeric type if possible, else Double
+                     if last_resolved_type not in ('Integer', 'Long', 'Single', 'Double', 'Currency', 'Byte'):
+                         last_resolved_type = 'Double'
+                     last_resolved_kind = 'Expression'
+                else:
+                    # Other operators (e.g. . ! which shouldn't be here if handled above?)
+                    # . is handled specifically. ! might be here.
+                    if val == '!': 
+                        # Bang operator (Collection access)
+                        # Not fully supported, treat as Unknown/Variant
+                        pass
+                
+                last_resolved_symbol = None
+                expect_member = False
+                prev_keyword = None
+                i += 1
+
             elif token.type in ('STRING', 'INTEGER', 'FLOAT'):
                 last_resolved_type = None
                 last_resolved_kind = 'Expression' # Literal
@@ -572,6 +643,9 @@ class Analyzer:
             else:
                 i += 1
         
+        if implied_type:
+            return implied_type, 'Expression', None
+            
         return last_resolved_type, last_resolved_kind, last_resolved_symbol
 
     def split_args(self, tokens):
@@ -699,7 +773,20 @@ class Analyzer:
                          # Strict Type Equality
                          # Ignore if types are Unknown
                          if param_type != 'Unknown' and arg_type != 'Unknown':
-                             if param_type.lower() != arg_type.lower():
+                             p_lower = param_type.lower()
+                             a_lower = arg_type.lower()
+                             
+                             compatible = False
+                             if p_lower == a_lower:
+                                 compatible = True
+                             elif p_lower == 'object' and a_lower not in ('string', 'integer', 'long', 'boolean', 'double', 'single', 'currency', 'date', 'byte', 'variant'):
+                                 compatible = True
+                             elif p_lower.endswith('.' + a_lower):
+                                 compatible = True
+                             elif a_lower.endswith('.' + p_lower):
+                                 compatible = True
+                             
+                             if not compatible:
                                  self.errors.append({
                                      "file": filename,
                                      "line": line,
