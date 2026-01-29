@@ -25,6 +25,7 @@ class Analyzer:
         self.global_scope = SymbolTable("Global", scope_type='Global')
         self.errors = []
         self.udts = {} # name_lower -> TypeNode
+        self.reference_names = set()
         
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
@@ -40,7 +41,16 @@ class Analyzer:
         # Load References as Global Symbols (Treat as Objects/Libraries)
         if "references" in self.config.object_model:
             for ref in self.config.object_model["references"]:
-                 self.global_scope.define(ref["name"], "Object", "Library")
+                 self.reference_names.add(ref["name"].lower())
+                 self.global_scope.define(ref["name"], ref["name"], "Library")
+
+        # Load Enums into Global Scope
+        for enum_name, members in self.config.object_model.get("enums", {}).items():
+            self.global_scope.define(enum_name, enum_name, "Enum") # Type = Enum Name
+            for member_name, val in members.items():
+                self.global_scope.define(member_name, "Long", "EnumItem")
+            for member_name, val in members.items():
+                self.global_scope.define(member_name, "Long", "EnumItem")
 
     def add_module(self, module_node):
         self.modules.append(module_node)
@@ -718,6 +728,27 @@ class Analyzer:
             for m in udt.members:
                 if m.name.lower() == member_name.lower():
                     return m.type_name, 'Variable'
+        
+        # 0.5 Check Library References (Global lookups)
+        if type_name.lower() in self.reference_names:
+             sym = self.global_scope.resolve(member_name)
+             if sym:
+                  return sym['type'], sym.get('kind', 'Expression')
+        
+        # 0.6 Check Enums
+        # If type_name matches a known Enum, check its members
+        enums = self.config.object_model.get("enums", {})
+        if type_name.lower() in enums:
+            members = enums[type_name.lower()]
+            # Case insensitive lookup
+            for m in members:
+                if m.lower() == member_name.lower():
+                    return "Long", "EnumItem"
+            
+            # Fallback: Check Global Scope (e.g. VisUnitCodes.visMillimeters where visMillimeters is Global)
+            sym = self.global_scope.resolve(member_name)
+            if sym:
+                 return sym['type'], sym.get('kind', 'Expression')
         
         # 1. Check Config Classes (Loaded from Model)
         cls_def = self.config.get_class(type_name)
