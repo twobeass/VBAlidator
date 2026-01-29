@@ -1,4 +1,6 @@
 __pycache__/
+build/
+vbalidator.egg-info/
 *.pyc
 vba_report.json
 debug_model.py
