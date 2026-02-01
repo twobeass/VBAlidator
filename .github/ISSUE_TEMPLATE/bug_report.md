@@ -30,11 +30,3 @@ End Sub
  * vbalidator Version:
 
 ---
-
-### Why this works for an AI Agent (Jules)
-
-1.  **Classification (Section 1):** The AI immediately knows the goal.
-    * If **False Positive**: The goal is to *loosen* constraints or add a missing definition.
-    * If **False Negative**: The goal is to *tighten* logic or add a new rule.
-2.  **Isolated Context (Section 2):** By forcing the user to put code in a triple-backtick block (` ```vba `), your agent can easily regex/extract the code snippet to run its own tests or reproduce the failure.
-3.  **Ground Truth (Section 4):** This provides the "Label" for the training/fixing instance. It tells the agent *what* the logic should have been.
