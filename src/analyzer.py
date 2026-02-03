@@ -442,7 +442,7 @@ class Analyzer:
                     continue
 
                 if expect_member and last_resolved_type:
-                    member_type, member_kind = self.resolve_member(last_resolved_type, name) or (None, None)
+                    member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name) or (None, None, None)
                     if not member_type:
                         # DEBUG
                         if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
@@ -457,7 +457,13 @@ class Analyzer:
                     # Propagate Kind if possible, or assume Unknown
                     # If resolved to a Variable member, it's a Variable.
                     last_resolved_kind = member_kind or 'Unknown'
-                    last_resolved_symbol = None # Members are not scope symbols
+
+                    # Store member metadata in a transient symbol dict for validation
+                    if member_extra:
+                        last_resolved_symbol = {"type": last_resolved_type, "kind": last_resolved_kind, "extra": member_extra}
+                    else:
+                        last_resolved_symbol = None
+
                     expect_member = False
                 else:
                     sym = scope.resolve(name)
@@ -590,7 +596,7 @@ class Analyzer:
                         else:
                             # Default Property Logic (e.g. Selection(1) -> Selection.Item(1))
                             # If the type is an object and has an "Item" member, resolve to that type.
-                            item_type, item_kind = self.resolve_member(last_resolved_type, 'Item') or (None, None)
+                            item_type, item_kind, item_extra = self.resolve_member(last_resolved_type, 'Item') or (None, None, None)
                             if item_type:
                                 last_resolved_type = item_type
                                 last_resolved_kind = item_kind or 'Unknown'
@@ -814,7 +820,7 @@ class Analyzer:
             udt = self.udts[type_name.lower()]
             for m in udt.members:
                 if m.name.lower() == member_name.lower():
-                    return m.type_name, 'Variable'
+                    return m.type_name, 'Variable', None
         
         # 2. Check Project Modules & Classes (Source Code)
         # PRIORITIZED: If type_name matches a Project Module/Class, search strictly within it.
@@ -827,12 +833,12 @@ class Analyzer:
                 # Check Variables
                 for v in mod.variables:
                     if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
-                        return v.type_name, 'Variable'
+                        return v.type_name, 'Variable', None
 
                 # Check Procedures
                 for p in mod.procedures:
                     if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
-                         return p.return_type, 'Procedure'
+                         return p.return_type, 'Procedure', p
 
                 # FALLBACK for Special Project Classes
                 if mod.module_type == 'Form':
@@ -843,11 +849,11 @@ class Analyzer:
                          for m_name, m_def in members.items():
                              if m_name.lower() == member_name.lower():
                                  t = m_def.get('type', 'Variant')
-                                 return t, 'Expression'
+                                 return t, 'Expression', m_def
 
                      # Implicit Controls (Form Heuristic - Keep for compatibility unless causing issues)
                      # Since we can't always parse controls perfectly from .frm, assume other members are Controls
-                     return 'Object', 'Variable'
+                     return 'Object', 'Variable', None
 
                 if mod.name.lower() == 'thisdocument':
                      doc_cls = self.config.get_class('Document') or self.config.get_class('IVDocument')
@@ -856,7 +862,7 @@ class Analyzer:
                          for m_name, m_def in members.items():
                              if m_name.lower() == member_name.lower():
                                  t = m_def.get('type', 'Variant')
-                                 return t, 'Expression'
+                                 return t, 'Expression', m_def
 
         if found_module_match:
              # Strict Check: If we found the module/class but not the member, STOP.
@@ -867,7 +873,7 @@ class Analyzer:
         if type_name.lower() in self.reference_names:
              sym = self.global_scope.resolve(member_name)
              if sym:
-                  return sym['type'], sym.get('kind', 'Expression')
+                  return sym['type'], sym.get('kind', 'Expression'), sym.get('extra')
         
         # 4. Check Enums
         # If type_name matches a known Enum, check its members
@@ -877,12 +883,12 @@ class Analyzer:
             # Case insensitive lookup
             for m in members:
                 if m.lower() == member_name.lower():
-                    return "Long", "EnumItem"
+                    return "Long", "EnumItem", None
             
             # Fallback: Check Global Scope (e.g. VisUnitCodes.visMillimeters where visMillimeters is Global)
             sym = self.global_scope.resolve(member_name)
             if sym:
-                 return sym['type'], sym.get('kind', 'Expression')
+                 return sym['type'], sym.get('kind', 'Expression'), sym.get('extra')
         
         # 5. Check Config Classes (Loaded from Model)
         cls_def = self.config.get_class(type_name)
@@ -894,7 +900,7 @@ class Analyzer:
                     k = 'Expression'
                     if t in ('Sub', 'Function', 'Property'):
                         k = 'Procedure'
-                    return t, k
+                    return t, k, m_def
 
         return None
 
