@@ -470,27 +470,14 @@ class Analyzer:
                              last_resolved_kind = 'EnumItem'
                         else:
                             last_resolved_symbol = None
-                            # HEURISTIC: If inside a Form, assume undefined identifier is an implicit Control
-                            is_in_form = False
-                            curr = scope
-                            while curr:
-                                if curr.scope_type == 'Form':
-                                    is_in_form = True
-                                    break
-                                curr = curr.parent
-                            
-                            if is_in_form:
-                                last_resolved_type = 'Object'
-                                last_resolved_kind = 'Control'
-                            else:
-                                if report_errors:
-                                    self.errors.append({
-                                        "file": filename,
-                                        "line": token.line,
-                                        "message": f"Undefined identifier '{name}' in '{context}'."
-                                    })
-                                last_resolved_type = 'Unknown'
-                                last_resolved_kind = 'Unknown'
+                            if report_errors:
+                                self.errors.append({
+                                    "file": filename,
+                                    "line": token.line,
+                                    "message": f"Undefined identifier '{name}' in '{context}'."
+                                })
+                            last_resolved_type = 'Unknown'
+                            last_resolved_kind = 'Unknown'
                     if not sym:
                         # ... (existing fallback logic)
                         # ...
@@ -809,20 +796,67 @@ class Analyzer:
         return self._resolve_member_base(type_name, member_name)
 
     def _resolve_member_base(self, type_name, member_name):
-        # 0. Check UDTs
+        # 1. Check UDTs (Local types)
         if type_name.lower() in self.udts:
             udt = self.udts[type_name.lower()]
             for m in udt.members:
                 if m.name.lower() == member_name.lower():
                     return m.type_name, 'Variable'
         
-        # 0.5 Check Library References (Global lookups)
+        # 2. Check Project Modules & Classes (Source Code)
+        # PRIORITIZED: If type_name matches a Project Module/Class, search strictly within it.
+        # This prevents masking "Member Not Found" errors by falling back to globals/libs.
+        found_module_match = False
+        for mod in self.modules:
+            if mod.name.lower() == type_name.lower():
+                found_module_match = True
+
+                # Check Variables
+                for v in mod.variables:
+                    if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
+                        return v.type_name, 'Variable'
+
+                # Check Procedures
+                for p in mod.procedures:
+                    if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
+                         return p.return_type, 'Procedure'
+
+                # FALLBACK for Special Project Classes
+                if mod.module_type == 'Form':
+                     # Check 'UserForm' base class members
+                     userform_cls = self.config.get_class('UserForm')
+                     if userform_cls:
+                         members = userform_cls.get('members', {})
+                         for m_name, m_def in members.items():
+                             if m_name.lower() == member_name.lower():
+                                 t = m_def.get('type', 'Variant')
+                                 return t, 'Expression'
+
+                     # Implicit Controls (Form Heuristic - Keep for compatibility unless causing issues)
+                     # Since we can't always parse controls perfectly from .frm, assume other members are Controls
+                     return 'Object', 'Variable'
+
+                if mod.name.lower() == 'thisdocument':
+                     doc_cls = self.config.get_class('Document') or self.config.get_class('IVDocument')
+                     if doc_cls:
+                         members = doc_cls.get('members', {})
+                         for m_name, m_def in members.items():
+                             if m_name.lower() == member_name.lower():
+                                 t = m_def.get('type', 'Variant')
+                                 return t, 'Expression'
+
+        if found_module_match:
+             # Strict Check: If we found the module/class but not the member, STOP.
+             # Do not fall back to References or Globals.
+             return None
+
+        # 3. Check Library References (Global lookups)
         if type_name.lower() in self.reference_names:
              sym = self.global_scope.resolve(member_name)
              if sym:
                   return sym['type'], sym.get('kind', 'Expression')
         
-        # 0.6 Check Enums
+        # 4. Check Enums
         # If type_name matches a known Enum, check its members
         enums = self.config.object_model.get("enums", {})
         if type_name.lower() in enums:
@@ -837,7 +871,7 @@ class Analyzer:
             if sym:
                  return sym['type'], sym.get('kind', 'Expression')
         
-        # 1. Check Config Classes (Loaded from Model)
+        # 5. Check Config Classes (Loaded from Model)
         cls_def = self.config.get_class(type_name)
         if cls_def:
             members = cls_def.get("members", {})
@@ -848,50 +882,6 @@ class Analyzer:
                     if t in ('Sub', 'Function', 'Property'):
                         k = 'Procedure'
                     return t, k
-        
-        # 2. Check Standard Modules
-        for mod in self.modules:
-            if mod.module_type == 'Module' and mod.name.lower() == type_name.lower():
-                for v in mod.variables:
-                    if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
-                        return v.type_name, 'Variable'
-                for p in mod.procedures:
-                    if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
-                         return p.return_type, 'Procedure'
-        
-        # 3. Check Project Classes
-        for mod in self.modules:
-            if mod.module_type in ('Class', 'Form') and mod.name.lower() == type_name.lower():
-                 for v in mod.variables:
-                     if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
-                         return v.type_name, 'Variable'
-                 for p in mod.procedures:
-                     if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
-                         return p.return_type, 'Procedure'
-                 
-                 # FALLBACK: If it's a Form, check the 'UserForm' class definition (from config)
-                 if mod.module_type == 'Form':
-                     userform_cls = self.config.get_class('UserForm')
-                     if userform_cls:
-                         members = userform_cls.get('members', {})
-                         for m_name, m_def in members.items():
-                             if m_name.lower() == member_name.lower():
-                                 t = m_def.get('type', 'Variant')
-                                 return t, 'Expression'
-                     
-                     # FALLBACK 2: Implicit Controls (e.g. Me.txtBox)
-                     # Since we can't parse controls from .frm text, assume any other member is a control
-                     return 'Object', 'Variable'
-                 
-                 # FALLBACK: ThisDocument (Special project class that acts as a Document)
-                 if mod.name.lower() == 'thisdocument':
-                     doc_cls = self.config.get_class('Document') or self.config.get_class('IVDocument')
-                     if doc_cls:
-                         members = doc_cls.get('members', {})
-                         for m_name, m_def in members.items():
-                             if m_name.lower() == member_name.lower():
-                                 t = m_def.get('type', 'Variant')
-                                 return t, 'Expression'
 
         return None
 
