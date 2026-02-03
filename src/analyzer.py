@@ -792,6 +792,14 @@ class Analyzer:
                              elif a_lower.endswith('.' + p_lower):
                                  compatible = True
                              
+                             # RELAXATION for Model/Library calls:
+                             # If the definition comes from the Model (extra is dict, not ProcedureNode),
+                             # and the argument is a generic Object, we assume it's valid (implicit cast or ByVal in reality).
+                             # This handles cases where the model generator incorrectly defaults to ByRef.
+                             if not compatible:
+                                 if isinstance(extra, dict) and a_lower == 'object':
+                                     compatible = True
+
                              if not compatible:
                                  self.errors.append({
                                      "file": filename,
