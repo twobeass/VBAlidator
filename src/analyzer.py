@@ -470,14 +470,27 @@ class Analyzer:
                              last_resolved_kind = 'EnumItem'
                         else:
                             last_resolved_symbol = None
-                            if report_errors:
-                                self.errors.append({
-                                    "file": filename,
-                                    "line": token.line,
-                                    "message": f"Undefined identifier '{name}' in '{context}'."
-                                })
-                            last_resolved_type = 'Unknown'
-                            last_resolved_kind = 'Unknown'
+                            # HEURISTIC: If inside a Form, assume undefined identifier is an implicit Control
+                            is_in_form = False
+                            curr = scope
+                            while curr:
+                                if curr.scope_type == 'Form':
+                                    is_in_form = True
+                                    break
+                                curr = curr.parent
+
+                            if is_in_form:
+                                last_resolved_type = 'Object'
+                                last_resolved_kind = 'Control'
+                            else:
+                                if report_errors:
+                                    self.errors.append({
+                                        "file": filename,
+                                        "line": token.line,
+                                        "message": f"Undefined identifier '{name}' in '{context}'."
+                                    })
+                                last_resolved_type = 'Unknown'
+                                last_resolved_kind = 'Unknown'
                     if not sym:
                         # ... (existing fallback logic)
                         # ...
