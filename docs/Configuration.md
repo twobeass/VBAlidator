@@ -37,9 +37,16 @@ VBAlidator will merge this model with the standard library to resolve symbols.
 VBAlidator includes internal logic to handle common VBA patterns that aren't always explicitly defined in type libraries.
 
 ### 1. Form Control Dynamic Resolution
-In `.frm` modules, any undefined identifier is automatically treated as an `Object` (Control). This allows code like `Me.lblStatus.Caption = "Ready"` to validate even if `lblStatus` isn't in the explicit model.
+In `.frm` modules, any undefined identifier is automatically treated as an `Object` (Control) via a heuristic. This allows code like `Me.lblStatus.Caption = "Ready"` to validate even if `lblStatus` isn't explicitly declared or in the model (common in legacy VBA).
 
-### 2. Standard VBA Callbacks
+**Note on Strictness:** While forms are permissive about controls, they remain strict about known types. If your form code calls `MyModule.MissingFunc()`, it *will* report an error because `MyModule` is a known project component.
+
+### 2. Strict Project Shadowing
+VBAlidator prioritizes Project Modules and Classes over Library References and Globals.
+*   **Shadowing:** If you have a module named `Excel`, it shadows the global `Excel` library.
+*   **Strict Check:** If a type name matches a known Project Module, the analyzer searches *strictly* within that module. It does **not** fall back to libraries or globals if the member is missing. This ensures that missing functions in your modules (e.g., `Lib_Module.Func1`) are correctly flagged as errors.
+
+### 3. Standard VBA Callbacks
 *   **`UserForm` Fallback**: If a member is not found on a Form object, VBAlidator checks the base `UserForm` class for common properties (`Show`, `Hide`, `Controls`, `Width`, `Height`).
 *   **`ThisDocument` Fallback**: In projects with a `ThisDocument` module, members not found in the module are resolved against the base `Document` / `IVDocument` class.
 *   **Default Member Resolution**: When an object is called like a function (e.g., `Selection(1)`), VBAlidator automatically resolves this to the object's `Item` property (e.g., `Selection.Item(1)`). This ensures that implicit collection access is strictly typed (e.g., `Selection(1)` resolves to `Shape`).
