@@ -457,6 +457,11 @@ class VBAParser:
             elif self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Static'):
                 stmt = self.collect_statement()
                 nodes.append(StatementNode(stmt))
+
+            elif self.match('IDENTIFIER', 'Attribute'):
+                # Ignore attribute statements inside blocks
+                self.consume('IDENTIFIER', 'Attribute')
+                self.consume_statement()
                 
             else:
                 # Normal Statement
