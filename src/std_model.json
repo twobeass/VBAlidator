@@ -50,9 +50,26 @@
     "Nothing": { "type": "Object" },
     "Empty": { "type": "Variant" },
     "Null": { "type": "Variant" },
-    "Me": { "type": "Object" }
+    "Me": { "type": "Object" },
+    "StrConv": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "InputB": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+    "LeftB": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+    "RightB": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+    "MidB": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 3 },
+    "LenB": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 1 },
+    "Clipboard": { "type": "Clipboard" }
   },
   "classes": {
+    "Clipboard": {
+      "members": {
+        "Clear": { "type": "Sub" },
+        "GetText": { "type": "Function", "returns": "String" },
+        "SetText": { "type": "Sub" },
+        "GetData": { "type": "Function", "returns": "Variant" },
+        "SetData": { "type": "Sub" },
+        "GetFormat": { "type": "Function", "returns": "Boolean" }
+      }
+    },
     "Debug": {
       "members": {
         "Print": { "type": "Sub" },

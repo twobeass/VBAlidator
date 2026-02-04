@@ -151,6 +151,37 @@ class Analyzer:
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
 
+                # Check for Exit Mismatch
+                if node.tokens and node.tokens[0].value.lower() == 'exit':
+                    if len(node.tokens) > 1:
+                        exit_kind = node.tokens[1].value.lower()
+                        if exit_kind in ('sub', 'function', 'property'):
+                            # Verify against context
+                            # Resolve context in parent scope
+                            # context is proc name
+                            proc_sym = scope.parent.resolve(context)
+                            if proc_sym and proc_sym.get('kind') == 'Procedure':
+                                proc_def = proc_sym['extra']
+                                proc_type_lower = proc_def.proc_type.lower()
+
+                                mismatch = False
+                                if exit_kind == 'sub':
+                                    if not proc_type_lower.startswith('sub'):
+                                        mismatch = True
+                                elif exit_kind == 'function':
+                                    if not proc_type_lower.startswith('function'):
+                                        mismatch = True
+                                elif exit_kind == 'property':
+                                    if not proc_type_lower.startswith('property'):
+                                        mismatch = True
+
+                                if mismatch:
+                                    self.errors.append({
+                                        "file": filename,
+                                        "line": node.tokens[0].line,
+                                        "message": f"Exit {node.tokens[1].value} not allowed in {proc_def.proc_type}."
+                                    })
+
                 # Check for Jump
                 if self.is_unconditional_jump(node.tokens):
                     # Check if conditional (e.g. "If x Then Exit Sub" split by colon)
@@ -705,6 +736,13 @@ class Analyzer:
 
              if has_param_array:
                   max_args = 999
+
+             # For Property Let/Set, the last argument is the value being assigned (RHS),
+             # so it doesn't appear in the argument list (parentheses).
+             if 'let' in extra.proc_type.lower() or 'set' in extra.proc_type.lower():
+                 if max_args > 0: max_args -= 1
+                 if min_args > 0: min_args -= 1
+
         elif isinstance(extra, dict):
              min_args = extra.get('min_args', 0)
              max_args = extra.get('max_args', 999)
@@ -768,6 +806,9 @@ class Analyzer:
                     mech = getattr(param, 'mechanism', 'ByRef')
                     param_type = param.type_name
                     param_name = param.name
+
+                if param_type.lower() == 'any':
+                    continue
 
                 if mech == 'ByRef':
                     # Only check if argument is a Variable (L-Value)
