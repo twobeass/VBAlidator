@@ -1,0 +1,18 @@
+{"sample":
+  {"fudge": "vanilla",
+   "story":
+     {"title": "Konfabulator Magnifico",
+      "author": "Fred G. Poobles",
+      "pages": 53,
+      "words": 12000
+     },
+   "text":
+     ["Fresh",
+       "Bold",
+       [37.987654321,
+        true,
+        null
+       ]
+     ]
+  }
+}
