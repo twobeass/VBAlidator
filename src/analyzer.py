@@ -792,12 +792,15 @@ class Analyzer:
                              elif a_lower.endswith('.' + p_lower):
                                  compatible = True
                              
-                             # RELAXATION for Model/Library calls:
-                             # If the definition comes from the Model (extra is dict, not ProcedureNode),
-                             # and the argument is a generic Object, we assume it's valid (implicit cast or ByVal in reality).
-                             # This handles cases where the model generator incorrectly defaults to ByRef.
+                             # RELAXATION:
+                             # If the argument is a generic Object, we allow it.
+                             # VBA treats 'Object' as a dynamic type that can be passed to strong-typed ByRef parameters
+                             # (often resolving at runtime or via implicit temp variables).
+                             # This prevents false positives for code like:
+                             #    Sub Fill(s As Shape) ... End Sub
+                             #    Dim o As Object: Fill o
                              if not compatible:
-                                 if isinstance(extra, dict) and a_lower == 'object':
+                                 if a_lower == 'object':
                                      compatible = True
 
                              if not compatible:
