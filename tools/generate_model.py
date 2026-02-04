@@ -105,8 +105,17 @@ def generate_model():
                                     # comtypes format: (['flags'], 'Return', 'Name', (['in', 'opt'], 'Type', 'ArgName'), ...)
                                     # So indices starting from 3 might be args
                                     if len(m) > 3:
+                                        potential_args = []
                                         for i in range(3, len(m)):
-                                            arg_def = m[i]
+                                            item = m[i]
+                                            # Check for Packed Arguments (nested tuple)
+                                            # If item[0] is a tuple, it's likely a list of arguments packed together
+                                            if isinstance(item, tuple) and len(item) > 0 and isinstance(item[0], tuple):
+                                                potential_args.extend(item)
+                                            else:
+                                                potential_args.append(item)
+
+                                        for arg_def in potential_args:
                                             # Validate arg_def structure
                                             if isinstance(arg_def, tuple) and len(arg_def) >= 3:
                                                 # (['in'], 'Type', 'ArgName')
