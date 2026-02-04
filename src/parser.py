@@ -757,7 +757,10 @@ class VBAParser:
                 
                 udt.members.append(VariableNode(var_name, var_type, 'Public'))
             
-            self.consume_statement()
+            if self.match('OPERATOR', ':'):
+                self.advance()
+            else:
+                self.consume_statement()
             
         module.types[type_name] = udt
 
@@ -795,8 +798,13 @@ class VBAParser:
                     self.advance()
                     # Skip value
                     while self.current_token.type not in ('NEWLINE', 'EOF', 'COMMENT'):
+                        if self.match('OPERATOR', ':'):
+                            break
                         self.advance()
 
-            self.consume_statement()
+            if self.match('OPERATOR', ':'):
+                self.advance()
+            else:
+                self.consume_statement()
 
         module.types[enum_name] = udt
