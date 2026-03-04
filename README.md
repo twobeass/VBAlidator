@@ -31,18 +31,19 @@
 
 ### 1. Generate the Object Model
 To validate host-specific code (e.g., `Visio.Shape`), you first need a model of that host.
+**For full, detailed instructions, see [Configuration](docs/Configuration.md).**
 1. Use `tools/VBA_Model_Exporter.bas` in your Office application to export references.
 2. Run the generator: `python tools/generate_model.py`.
 
 ### 2. Run the Validator
-If you have a `vba_model.json` in your current directory, it will be automatically used.
+If you have a `vba_model.json` in your current directory, it will be automatically used by default:
 ```bash
 vbalidator ./path/to/vba_code
 ```
 
-You can also specify the model manually:
+If your model is in a different location or has a different name, you must specify it manually:
 ```bash
-vbalidator ./path/to/vba_code --model /path/to/vba_model.json
+vbalidator ./path/to/vba_code --model /path/to/my_custom_model.json
 ```
 
 ## 📚 Documentation

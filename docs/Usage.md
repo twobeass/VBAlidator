@@ -44,13 +44,13 @@ python -m src.main [options] <input_folder>
 | `input_folder` | **Required.** Positional argument. Path to the directory containing your exported `.bas`, `.cls`, and `.frm` files. |
 | `-h, --help` | Show help message and exit. |
 | `--define` | Conditional Compilation constants. Format: `KEY=VALUE,KEY2=True`. |
-| `--model` | Path to a custom JSON Object Model file. If omitted, the tool looks for `vba_model.json` in the current directory. |
+| `--model` | Path to a custom JSON Object Model file. If omitted, the tool looks for `vba_model.json` in the current directory. You **must** generate this file first. See [Configuration](Configuration.md) for detailed instructions on generating the model. |
 | `--output` | Path to save the structured JSON report (default: `vba_report.json`). |
 
 ### Examples
 
 #### Basic Check
-Check all files in the `export` folder. If `vba_model.json` exists in the current directory, it will be used.
+Check all files in the `export` folder. (Note: This assumes `vba_model.json` already exists in the current directory).
 ```bash
 vbalidator ./export
 ```
