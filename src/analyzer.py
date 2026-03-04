@@ -405,7 +405,7 @@ class Analyzer:
             if last_resolved_kind in ('Function', 'Procedure', 'Global') and last_resolved_name and not expect_member:
                  is_arg_start = False
                  if token.type in ('STRING', 'INTEGER', 'FLOAT'): is_arg_start = True
-                 elif token.type == 'IDENTIFIER': is_arg_start = True
+                 elif token.type == 'IDENTIFIER' and token.value.lower() not in KEYWORDS: is_arg_start = True
                  elif token.type == 'OPERATOR' and token.value.lower() in ('-', 'not', 'byval', 'byref'): is_arg_start = True
 
                  if is_arg_start:
@@ -473,7 +473,8 @@ class Analyzer:
                     continue
 
                 if expect_member and last_resolved_type:
-                    member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name) or (None, None, None)
+                    current_module_name = next((m.name for m in self.modules if m.filename == filename), None)
+                    member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name, current_module_name) or (None, None, None)
                     if not member_type:
                         # DEBUG
                         if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
@@ -576,7 +577,9 @@ class Analyzer:
                     # Check if we are invoking something that isn't callable
                     # Must be a Variable (not a Procedure/Function) AND have a non-array scalar type
                     if last_resolved_kind == 'Variable' and last_resolved_type in ('String', 'Integer', 'Long', 'Boolean', 'Double', 'Currency', 'Date', 'Single', 'Byte'):
-                         if report_errors:
+                         # We allow 'Unknown', 'Variant', 'Object', 'LongPtr', 'Any' and user defined types.
+                         # Also ignore if prev_keyword was AddressOf or similar
+                         if report_errors and prev_keyword != 'addressof':
                             self.errors.append({
                                 "file": filename,
                                 "line": token.line,
@@ -627,7 +630,8 @@ class Analyzer:
                         else:
                             # Default Property Logic (e.g. Selection(1) -> Selection.Item(1))
                             # If the type is an object and has an "Item" member, resolve to that type.
-                            item_type, item_kind, item_extra = self.resolve_member(last_resolved_type, 'Item') or (None, None, None)
+                            current_module_name = next((m.name for m in self.modules if m.filename == filename), None)
+                            item_type, item_kind, item_extra = self.resolve_member(last_resolved_type, 'Item', current_module_name) or (None, None, None)
                             if item_type:
                                 last_resolved_type = item_type
                                 last_resolved_kind = item_kind or 'Unknown'
@@ -851,22 +855,22 @@ class Analyzer:
                                      "message": f"ByRef argument type mismatch. Parameter '{param_name}' expects '{param_type}', but got variable of type '{arg_type}'."
                                  })
 
-    def resolve_member(self, type_name, member_name):
-        return self._resolve_member_internal(type_name, member_name)
+    def resolve_member(self, type_name, member_name, current_module_name=None):
+        return self._resolve_member_internal(type_name, member_name, current_module_name)
 
-    def _resolve_member_internal(self, type_name, member_name):
+    def _resolve_member_internal(self, type_name, member_name, current_module_name=None):
         # Handle Qualified Types
         if '.' in type_name:
              simple_name = type_name.split('.')[-1]
-             res = self._resolve_member_base(type_name, member_name)
+             res = self._resolve_member_base(type_name, member_name, current_module_name)
              if res: return res
-             res = self._resolve_member_base(simple_name, member_name)
+             res = self._resolve_member_base(simple_name, member_name, current_module_name)
              if res: return res
              return None
         
-        return self._resolve_member_base(type_name, member_name)
+        return self._resolve_member_base(type_name, member_name, current_module_name)
 
-    def _resolve_member_base(self, type_name, member_name):
+    def _resolve_member_base(self, type_name, member_name, current_module_name=None):
         # 1. Check UDTs (Local types)
         if type_name.lower() in self.udts:
             udt = self.udts[type_name.lower()]
@@ -881,15 +885,23 @@ class Analyzer:
         for mod in self.modules:
             if mod.name.lower() == type_name.lower():
                 found_module_match = True
+                
+                is_local = current_module_name and current_module_name.lower() == mod.name.lower()
 
                 # Check Variables
                 for v in mod.variables:
-                    if v.name.lower() == member_name.lower() and v.scope.lower() in ('public', 'global', 'friend'):
+                    allowed_scopes = ('public', 'global', 'friend')
+                    if is_local:
+                        allowed_scopes = ('public', 'global', 'friend', 'private', 'dim')
+                    if v.name.lower() == member_name.lower() and v.scope.lower() in allowed_scopes:
                         return v.type_name, 'Variable', None
 
                 # Check Procedures
                 for p in mod.procedures:
-                    if p.name.lower() == member_name.lower() and p.scope.lower() in ('public', 'friend'):
+                    allowed_scopes = ('public', 'friend')
+                    if is_local:
+                        allowed_scopes = ('public', 'friend', 'private')
+                    if p.name.lower() == member_name.lower() and p.scope.lower() in allowed_scopes:
                          return p.return_type, 'Procedure', p
 
                 # FALLBACK for Special Project Classes

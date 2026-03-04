@@ -29,7 +29,7 @@ class Lexer:
             ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
-            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:]'), # Added : to operator
+            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\]'), # Added : and \ to operator
             ('IDENTIFIER', r'[a-zA-Z_]\w*'), 
             ('MISMATCH', r'.'),
         ]
