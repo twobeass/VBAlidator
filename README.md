@@ -1,70 +1,155 @@
 # VBAlidator
 
+> **Premium VBA static analyser & compile-safety prechecker for AI-generated VBA.**
+> Drop-in behind any LLM-VBA generator — get a deterministic 0–100
+> confidence score and a stable JSON report before the code ever
+> reaches a workbook.
+
+[![PyPI version](https://img.shields.io/pypi/v/vbalidator)](https://pypi.org/project/vbalidator/)
+[![CI](https://github.com/twobeass/VBAlidator/actions/workflows/ci.yml/badge.svg)](https://github.com/twobeass/VBAlidator/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/badge/ghcr.io-twobeass%2Fvbalidator-blue?logo=docker)](https://github.com/twobeass/VBAlidator/pkgs/container/vbalidator)
+[![Docs](https://img.shields.io/badge/docs-twobeass.github.io-blue)](https://twobeass.github.io/VBAlidator/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**VBAlidator** is a robust, platform-independent static analysis tool for VBA (Visual Basic for Applications). It allows you to simulate the "compilation" of VBA code exported from MS Office applications on any environment (Windows, Linux, or Mac), ensuring code integrity without needing to open the Office application itself.
+VBAlidator parses `.bas` / `.cls` / `.frm` files through a real
+lexer / preprocessor / parser / analyzer pipeline, applies **35
+documented rules** (see [the catalogue](docs/rules/index.md)), and
+returns a verdict CI pipelines and AI agents can act on directly.
 
-## 🚀 Features
+## What it catches
 
-*   **Static Analysis:** Detects undefined variables, invalid member access, and type mismatches.
-*   **Dynamic Object Model:** Generate and load object models for *any* VBA host (Visio, Excel, Word, AutoCAD) using the integrated TLI-based generator.
-*   **Deep Parsing:** Comprehensive parser handling nested `With` blocks, multi-statement lines, and complex loops.
-*   **Conditional Compilation:** Full support for `#If...#Else` directives to simulate different environments (e.g., Win64 vs Win32).
-*   **Form Support:** Intelligent heuristics for `.frm` files to handle implicit GUI controls and `UserForm` members.
-*   **CI/CD Ready:** Returns exit codes and generates JSON reports for seamless integration into build pipelines.
+The full list lives at [`docs/rules/index.md`](docs/rules/index.md).
+The high-impact subset that AI generators trip over most often:
 
-## 📦 Installation
+- **VBA001** undefined identifiers, **VBA002** missing object members
+- **VBA006** wrong argument count, **VBA007** ByRef type mismatches
+- **VBA210** `Set` on scalar, **VBA211** missing `Set` on object assignment
+- **VBA221–VBA224** Property Get/Let/Set arity & semantics
+- **VBA230 / VBA231** non-constant Const initialisers
+- **VBA240** arithmetic between string and numeric literal
+- **VBA300** missing `PtrSafe` on 64-bit Office Declares
+- **VBA320** missing `Option Explicit` (warning)
+- **VBA330** incomplete `Implements` of an interface
+- **VBA340 / VBA341** `RaiseEvent` without matching `Event` declaration / wrong arity
+- **VBA_LEX001 / VBA_LEX002** unrecognised characters & malformed date literals
+- **VBA_RT001** *(optional)* errors caught by the actual VBE compiler via Office round-trip
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/twobeass/VBAlidator.git
-    cd VBAlidator
-    ```
-
-2.  **Install the package:**
-    ```bash
-    pip install .
-    ```
-    This will install the dependencies and the `vbalidator` command-line tool.
-
-## 🛠️ Quick Start
-
-### 1. Generate the Object Model
-To validate host-specific code (e.g., `Visio.Shape`), you first need a model of that host.
-**For full, detailed instructions, see [Configuration](docs/Configuration.md).**
-1. Use `tools/VBA_Model_Exporter.bas` in your Office application to export references.
-2. Run the generator: `python tools/generate_model.py`.
-
-### 2. Run the Validator
-If you have a `vba_model.json` in your current directory, it will be automatically used by default:
-```bash
-vbalidator ./path/to/vba_code
-```
-
-If your model is in a different location or has a different name, you must specify it manually:
-```bash
-vbalidator ./path/to/vba_code --model /path/to/my_custom_model.json
-```
-
-## 📚 Documentation
-
-Detailed documentation is available in the `docs/` folder:
-
-*   [**Usage Guide**](docs/Usage.md): CLI arguments, options, and advanced usage.
-*   [**Configuration**](docs/Configuration.md): How to generate custom Object Models and how heuristics work.
-*   [**Architecture**](docs/Architecture.md): Deep dive into the Lexer, Parser, and Analyzer.
-
-## 🧪 Testing
+## Install
 
 ```bash
-vbalidator tests/samples/valid_code
+pip install vbalidator
 ```
 
-To see the tool in action against intentional errors, check the `tests/demo` folder:
+…or grab the multi-arch image:
+
 ```bash
-vbalidator tests/demo
+docker pull ghcr.io/twobeass/vbalidator:latest
 ```
 
-## 📄 License
+## In one CLI call
 
-This project is licensed under the MIT License.
+```bash
+vbalidator ./MyModules --host excel
+```
+
+```text
+MyModules/Module1.bas:42: ERROR  [VBA001]  Undefined identifier 'tpyo' in 'DoStuff'.
+MyModules/Module1.bas:1:  WARNING [VBA320]  Module 'Module1' is missing `Option Explicit`.
+
+Files scanned : 12
+Errors        : 1
+Warnings      : 1
+Confidence    : 77 / 100  (needs fixes)
+Report saved  : vba_report.json
+```
+
+Exit code is `1` when the score is below the gate (`--score-threshold`,
+default 90) or there is at least one error.
+
+## In one Python call
+
+```python
+from vbalidator import precheck
+
+result = precheck("Module1.bas", host="excel")
+
+if result.compile_safe:
+    deploy(result)
+else:
+    for err in result.errors:
+        print(f"{err['rule_id']}: {err['message']}")
+
+print(f"score = {result.score} / 100")
+print(result.json())   # canonical JSON v2 report
+```
+
+`PrecheckResult` exposes `errors`, `warnings`, `info`, `issues`, and
+the canonical `.json()` report. It's also truthy when `compile_safe`,
+so `if precheck(...): ...` is idiomatic.
+
+See [docs/ai-integration.md](docs/ai-integration.md) for full
+recipes (Anthropic SDK, OpenAI Agents, LangChain, GitHub Actions).
+
+## Optional dynamic verification
+
+When a Windows host with Office is available, cross-check the static
+verdict against the actual VBE compiler:
+
+```bash
+vbalidator ./MyModules --host excel --roundtrip
+```
+
+```python
+result = precheck("Module1.bas", host="excel", roundtrip=True)
+```
+
+Compile errors VBE itself reports come back with
+`severity='compile_verified'` and rule_id `VBA_RT001`. On non-Windows
+hosts the call degrades gracefully to a single info-level notice
+instead of crashing.
+
+## Bundled host models
+
+`--host excel|word|access|outlook` auto-loads the matching object
+model from `src/models/`. Cover ~600 host-specific globals / classes
+out of the box — no need to run a COM exporter for the common case.
+
+## Documentation
+
+The full site is at **<https://twobeass.github.io/VBAlidator/>** —
+deployed automatically from `main` by `.github/workflows/docs.yml`.
+
+In-repo:
+
+- [Quickstart](docs/quickstart.md) — install → scan → ship
+- [AI pipeline integration](docs/ai-integration.md) — patterns for
+  Claude, OpenAI Agents, LangChain, CI gates
+- [Usage](docs/Usage.md) — full CLI / Python API reference
+- [Configuration](docs/Configuration.md) — host models, custom models,
+  conditional-compilation defaults, heuristics
+- [Architecture](docs/Architecture.md) — pipeline internals
+- [Rule catalogue](docs/rules/index.md) — all 35 rules with examples
+- [CI / CD](docs/ci-cd.md) — workflows, release lifecycle, branch
+  protection
+- [Roadmap](docs/roadmap.md) — what's done, what's queued
+
+## Development
+
+```bash
+git clone https://github.com/twobeass/VBAlidator
+cd VBAlidator
+pip install -e ".[dev]"
+pytest                              # 148 tests
+ruff check src tests                # lint
+python tools/generate_rule_docs.py  # refresh docs/rules/ after a rule change
+```
+
+PR titles must follow [Conventional Commits] (`feat:` / `fix:` / `docs:` …).
+The release pipeline derives the next semver bump from your commit
+history.
+
+[Conventional Commits]: https://www.conventionalcommits.org/
+
+## License
+
+MIT.

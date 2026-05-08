@@ -1,0 +1,37 @@
+# VCS
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Python build / test artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local development
+debug_model.py
+vba_report.json
+.semantic_release_templates/
+
+# Tests are not needed inside the image.
+tests/
+docs/
+tools/
+README.md
+CHANGELOG.md

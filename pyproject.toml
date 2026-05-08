@@ -5,19 +5,50 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vbalidator"
 version = "0.1.1"
-description = "VBA Static Analysis Tool"
+description = "Premium VBA static analyser & compile-safety prechecker for AI-generated VBA"
 readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "twobeass" },
+]
+keywords = ["vba", "static-analysis", "linter", "office", "excel", "macro", "ai", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Compilers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "colorama",
     "comtypes; sys_platform == 'win32'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/twobeass/VBAlidator"
+Documentation = "https://twobeass.github.io/VBAlidator/"
+Issues = "https://github.com/twobeass/VBAlidator/issues"
+Changelog = "https://github.com/twobeass/VBAlidator/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.5",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
+roundtrip = [
+    "pywin32>=300; sys_platform == 'win32'",
 ]
 
 [project.scripts]
@@ -64,3 +95,27 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402"]  # tests adjust sys.path before imports
+
+# python-semantic-release driven by Conventional Commits.
+# Bumps version in pyproject.toml, generates CHANGELOG.md, tags and
+# creates the GitHub release. PyPI publish is handled by a follow-up
+# job using OIDC trusted publishing.
+[tool.semantic_release]
+version_variables = ["src/__init__.py:__version__"]
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+upload_to_vcs_release = true
+build_command = "python -m pip install build && python -m build"
+commit_message = "chore(release): v{version}\n\n[skip ci]"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "build", "chore", "style"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor"]
+
+[tool.semantic_release.changelog]
+template_dir = ".semantic_release_templates"
+exclude_commit_patterns = [
+    "^chore\\(release\\)",
+    "^chore\\(deps\\)",
+]

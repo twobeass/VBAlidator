@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a new rule, host model, or capability.
+title: "[Feature] <one-line summary>"
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What VBA bug class / workflow pain motivates this request?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Sketch the rule, API addition, or behaviour you'd like.
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Concrete examples
+      description: VBA snippets that should fail / pass under the proposed rule.
+      render: vb

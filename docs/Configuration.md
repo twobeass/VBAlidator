@@ -1,75 +1,148 @@
-# Configuration & Extending VBAlidator
+# Configuration
 
-VBAlidator supports dynamic loading of object models (Classes, Interfaces, Enums) via external JSON. This allows you to validate code against any VBA host (Visio, Excel, Word, AutoCAD, etc.).
+VBAlidator reads its symbol knowledge from three layered sources, in
+the following precedence (highest first):
 
-## 🛠️ Generating a Custom Object Model
+1. **Custom model** — passed via `--model my.json` or
+   `precheck(model_path="my.json")`.
+2. **Host model** — bundled with the package, selected by
+   `--host excel|word|access|outlook` or
+   `precheck(host="excel")`. Lives at `src/models/<host>.json`.
+3. **Standard model** — `src/std_model.json`. Always loaded; covers
+   the VBA runtime (string functions, math, dates, file IO, vb*
+   constants).
 
-We provide a 2-step process to generate this model by inspecting the host application's Type Libraries (TLI).
+Anything resolved at level 1 wins over level 2 and level 3. Identifiers
+not resolved at any layer trigger `VBA001 Undefined identifier`.
 
-### Step 1: Export References (VBA)
-1.  **Open the VBA Editor** (`Alt+F11`) in your target application (e.g., Visio).
-2.  **Import Tool**: Import `tools/VBA_Model_Exporter.bas`.
-3.  **Run Export**: Execute the `ExportReferences` macro.
-    *   This generates `vba_references.json` containing the GUIDs and paths of all project references.
+## Conditional-compilation defaults
 
-### Step 2: Generate Model (Python)
-1.  Ensure you have the Python dependencies (`pip install comtypes`).
-2.  Run the generator script:
-    ```bash
-    python tools/generate_model.py
-    ```
-    *   This script uses COM to inspect the libraries and produces `vba_model.json`.
-    *   It handles **CoClass member inheritance**, property name normalization, and promotes library functions (like `Mid`, `InStr`) to the global scope.
-    *   **Enhancement**: It robustly extracts **Enums** and **Module-level Constants** (e.g., `visNone`, `vbCrLf`).
-    *   **Type Refinement**: Automatically maps generic collection accessors (like `Selection.Item`) to specific types (e.g., `Shape`), ensuring strict validation for collection items.
+`Config()` ships with modern Microsoft 365 defaults:
 
-### Using the Model
-Pass the generated `vba_model.json` to VBAlidator using the `--model` flag:
-```bash
-python -m src.main ./my_code --model vba_model.json
+| Constant | Default | Override |
+|----------|---------|----------|
+| `VBA7` | True | `--define VBA7=False` |
+| `WIN64` | True | `--define WIN64=False` |
+| `WIN32` | False | `--define WIN32=True` |
+| `WIN16` | False | (legacy only) |
+| `MAC` | False | `--define MAC=True` |
+
+VBA's `#If` evaluator is **case-insensitive**, so
+`#If Vba7 Then` and `#If VBA7 Then` are equivalent.
+
+## Bundled host models
+
+| `--host` | File | Highlights |
+|----------|------|------------|
+| `excel` | `src/models/excel.json` | Application, Workbook, Worksheet, Range, WorksheetFunction, Names, Shapes, Window, Interior, Font, Borders, Validation, Chart + ~70 `xl*` enum aliases |
+| `word` | `src/models/word.json` | Application, Documents, Document, Range, Selection, Window + `wd*` aliases |
+| `access` | `src/models/access.json` | Application, DoCmd, Database, Recordset, DBEngine, CurrentProject, DLookup/DCount/DSum/Nz globals + `ac*` / `db*` aliases |
+| `outlook` | `src/models/outlook.json` | Application, NameSpace, Folder, Items, MailItem + `ol*` aliases |
+
+## Custom models
+
+A custom JSON model lets you cover libraries / classes the bundled
+host models don't ship — e.g. Visio, AutoCAD, ComctlLib, your own
+add-in's `.tlb`.
+
+### Schema
+
+```jsonc
+{
+  "globals": {
+    "MyGlobal": {
+      "type": "Function",          // or a class name
+      "returns": "Variant",        // when type=="Function"
+      "min_args": 1,
+      "max_args": 3,
+      "args": [                    // optional; required for ByRef checks
+        { "name": "x", "type": "Long", "mechanism": "ByRef" }
+      ]
+    }
+  },
+  "classes": {
+    "MyClass": {
+      "members": {
+        "DoStuff": { "type": "Sub" },
+        "Value":   { "type": "Long" }
+      }
+    }
+  },
+  "enums": {
+    "MyEnum": { "Foo": 0, "Bar": 1 }
+  },
+  "references": [
+    { "name": "Visio" }
+  ]
+}
 ```
-VBAlidator will merge this model with the standard library to resolve symbols.
 
----
+`globals` keys land in the global scope; `classes` describe member
+chains for `--host` types; `enums` register both the enum name and
+each member as a globally visible Long; `references` register library
+names so qualified accesses like `Visio.Application` resolve.
 
-## 🧠 Built-in Heuristics
+### Generating a model from COM
 
-VBAlidator includes internal logic to handle common VBA patterns that aren't always explicitly defined in type libraries.
+The bundled `tools/VBA_Model_Exporter.bas` walks the host's
+`References` collection and dumps `vba_model.json` with the matching
+schema. Open the VBE in your target host (Visio, AutoCAD, …), import
+the macro, and run `ExportModel`.
 
-### 1. Form Control Dynamic Resolution
-In `.frm` modules, any undefined identifier is automatically treated as an `Object` (Control) via a heuristic. This allows code like `Me.lblStatus.Caption = "Ready"` to validate even if `lblStatus` isn't explicitly declared or in the model (common in legacy VBA).
+```bash
+vbalidator ./MyAddin --host excel --model ./vba_model.json
+```
 
-**Note on Strictness:** While forms are permissive about controls, they remain strict about known types. If your form code calls `MyModule.MissingFunc()`, it *will* report an error because `MyModule` is a known project component.
+`std_model.json` and `--host` always merge first; `--model` is layered
+on top and may override individual entries.
 
-### 2. Strict Project Shadowing
-VBAlidator prioritizes Project Modules and Classes over Library References and Globals.
-*   **Shadowing:** If you have a module named `Excel`, it shadows the global `Excel` library.
-*   **Strict Check:** If a type name matches a known Project Module, the analyzer searches *strictly* within that module. It does **not** fall back to libraries or globals if the member is missing. This ensures that missing functions in your modules (e.g., `Lib_Module.Func1`) are correctly flagged as errors.
+## Built-in heuristics
 
-### 3. Standard VBA Callbacks
-*   **`UserForm` Fallback**: If a member is not found on a Form object, VBAlidator checks the base `UserForm` class for common properties (`Show`, `Hide`, `Controls`, `Width`, `Height`).
-*   **`ThisDocument` Fallback**: In projects with a `ThisDocument` module, members not found in the module are resolved against the base `Document` / `IVDocument` class.
-*   **Default Member Resolution**: When an object is called like a function (e.g., `Selection(1)`), VBAlidator automatically resolves this to the object's `Item` property (e.g., `Selection.Item(1)`). This ensures that implicit collection access is strictly typed (e.g., `Selection(1)` resolves to `Shape`).
+### 1. Form-control dynamic resolution
+In `.frm` modules, undefined identifiers default to `Object` so
+implicit form controls (`Me.lblStatus.Caption = …`) don't trip the
+analyser. Members that *are* in the standard `UserForm` model still
+resolve normally.
 
-### 3. Case Insensitivity
-VBA is case-insensitive. VBAlidator normalizes all model lookups (classes, members, enums, globals) to lowercase to ensure `ActivePage` matches `activepage`.
+### 2. Strict project shadowing
+A project module named `Excel` shadows the `Excel` library. When a
+type is a known project module, member lookup is strict against that
+module — fallback to libraries does not happen, so a typo'd member
+inside your own module still raises `VBA002 Member not found`.
 
----
+### 3. UserForm / ThisDocument fallback
+Members not found on a Form fall back to base `UserForm`. `ThisDocument`
+falls back to `Document` / `IVDocument`.
 
-## 🧱 Hardcoded Metadata
+### 4. Default member resolution
+`obj(1)` is implicitly resolved to `obj.Item(1)` if the type exposes
+`Item`. Lets `Selection(1)` correctly type-resolve to `Shape` etc.
 
-### Hardcoded Keywords
-The following keywords are reserved by the analyzer and cannot be used as variable names (matching VBA compiler behavior). They are hardcoded in `src/analyzer.py`:
+### 5. Identifier suffix normalisation
+`Mid$`, `Mid`, and `[Mid]` resolve to the same standard global. The
+suffix-stripping is purely a lookup convenience — the *original*
+spelling is preserved in error messages.
+
+### 6. Case-insensitive lookup
+All model lookups are normalised to lowercase, matching VBA semantics.
+
+## Reserved keywords
+The following identifiers are reserved by the analyser. Using them as
+variable names triggers parser-level errors via the legacy `VBA010`
+rule.
 
 | Category | Keywords |
-| :--- | :--- |
-| **Logic/Flow** | `if`, `then`, `else`, `elseif`, `end`, `exit`, `for`, `next`, `do`, `loop`, `while`, `wend`, `select`, `case`, `with`, `goto`, `resume`, `stop`, `on`, `error` |
-| **Declarations** | `dim`, `static`, `const`, `public`, `private`, `global`, `sub`, `function`, `property`, `get`, `let`, `set`, `type`, `new`, `withevents`, `as` |
-| **Types** | `boolean`, `integer`, `long`, `single`, `double`, `currency`, `date`, `string`, `variant`, `object`, `byte`, `decimal`, `nothing`, `empty`, `null` |
-| **Operators** | `and`, `or`, `xor`, `not`, `is`, `like`, `typeof`, `mod`, `true`, `false` |
-| **I/O** | `open`, `close`, `input`, `output`, `append`, `binary`, `random`, `put`, `print` |
-| **Utilities** | `len`, `mid`, `redim`, `preserve`, `erase`, `call` |
+|----------|----------|
+| Flow | `if`, `then`, `else`, `elseif`, `end`, `exit`, `for`, `next`, `do`, `loop`, `while`, `wend`, `select`, `case`, `with`, `goto`, `gosub`, `resume`, `stop`, `on`, `error` |
+| Declarations | `dim`, `static`, `const`, `public`, `private`, `global`, `friend`, `sub`, `function`, `property`, `get`, `let`, `set`, `type`, `new`, `withevents`, `as`, `implements`, `event`, `raiseevent` |
+| Types | `boolean`, `integer`, `long`, `longlong`, `longptr`, `single`, `double`, `currency`, `decimal`, `date`, `string`, `variant`, `object`, `byte`, `nothing`, `empty`, `null` |
+| Operators | `and`, `or`, `xor`, `not`, `is`, `like`, `typeof`, `mod`, `true`, `false`, `eqv`, `imp` |
+| Arrays / IO | `redim`, `preserve`, `erase`, `open`, `close`, `input`, `output`, `append`, `binary`, `random`, `put`, `print` |
+| Misc | `len`, `mid`, `call`, `defint`, `defstr`, `defbool`, `deflng`, `defdbl`, `defsng`, `defcur`, `defdate`, `defobj`, `defvar`, `option` |
 
-### Implicit Top-Level Globals
-*   **`Visio`**: Always available as an `IVApplication` proxy (if the Visio library is loaded).
-*   **Forms/Classes**: Any module with `PredeclaredId = True` is automatically available as a global instance named after the class.
+## Implicit top-level globals
+- Forms / Classes with `Attribute VB_PredeclaredId = True` are
+  registered as a global instance named after the class.
+- The current host (Excel `Application`, Word `Application`, …) lives
+  in the matching `--host` model and so is always available when the
+  flag is set.

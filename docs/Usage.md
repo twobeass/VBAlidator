@@ -1,115 +1,141 @@
-# Usage Guide
+# Usage
 
-**VBAlidator** is a command-line tool designed to statically analyze VBA code exported from Microsoft Office applications. It simulates the compilation process to detect syntax errors, undefined variables, and type mismatches without requiring the Windows environment.
+## Install
 
-## Installation
+=== "PyPI"
 
-### Prerequisites
-- Python 3.8 or higher
-- Pip (Python Package Manager)
+    ```bash
+    pip install vbalidator
+    ```
 
-### Setup
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/twobeass/VBAlidator.git
-   cd VBAlidator
-   ```
+=== "Docker (GHCR)"
 
-2. Install the package:
-   ```bash
-   pip install .
-   ```
-   This makes the `vbalidator` command available system-wide (or in your virtual environment).
+    ```bash
+    docker pull ghcr.io/twobeass/vbalidator:latest
+    docker run --rm \
+      -v "$PWD/MyModules:/workspace" \
+      ghcr.io/twobeass/vbalidator:latest \
+      /workspace --host excel
+    ```
 
-## Running the Tool
+=== "From source"
 
-You can run the tool using the `vbalidator` command.
+    ```bash
+    git clone https://github.com/twobeass/VBAlidator
+    cd VBAlidator
+    pip install -e ".[dev]"
+    pytest                       # 148 tests
+    ```
 
-```bash
-vbalidator [options] <input_folder>
-```
-
-### Alternative Usage (Module Execution)
-
-If you prefer not to install the package or are developing the tool, you can execute it directly as a Python module from the root directory:
+## CLI
 
 ```bash
-python -m src.main [options] <input_folder>
+vbalidator <input> [options]
 ```
 
-### Arguments
+`<input>` is either a single `.bas` / `.cls` / `.frm` file or a folder
+that is walked recursively.
 
-| Argument | Description |
-| :--- | :--- |
-| `input_folder` | **Required.** Positional argument. Path to the directory containing your exported `.bas`, `.cls`, and `.frm` files. |
-| `-h, --help` | Show help message and exit. |
-| `--define` | Conditional Compilation constants. Format: `KEY=VALUE,KEY2=True`. |
-| `--model` | Path to a custom JSON Object Model file. If omitted, the tool looks for `vba_model.json` in the current directory. You **must** generate this file first. See [Configuration](Configuration.md) for detailed instructions on generating the model. |
-| `--output` | Path to save the structured JSON report (default: `vba_report.json`). |
+### Options
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--host {excel,word,access,outlook}` | _none_ | Auto-load the bundled host model so `Workbook`, `Document`, `Recordset`, etc. resolve out of the box. |
+| `--model PATH` | `vba_model.json` if present | Custom JSON object model. Layered on top of the std model and any `--host` model. |
+| `--define KEY=VAL,KEY2=VAL2` | _none_ | Conditional-compilation constants. Override `WIN64` / `VBA7` to force 32-bit mode. |
+| `--score-threshold N` | `90` | Minimum score for a clean exit. |
+| `--strict` / `--no-strict` | `--strict` | Whether `severity=warning` findings count toward the gating score. Errors always do. |
+| `--roundtrip` | off | Cross-check via the actual VBE compiler. Windows + Office + pywin32 only; degrades gracefully off-platform. |
+| `--quiet` | off | Suppress per-issue output, print summary only. |
+| `--output PATH` | `vba_report.json` | Where to write the JSON v2 report. |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | `compile_safe == True` and `score ≥ threshold` |
+| 1 | Score below threshold, or at least one error |
+| 2 | Input path does not exist |
+| 3 | Pipeline crash |
+| 4 | Could not write the JSON report |
 
 ### Examples
 
-#### Basic Check
-Check all files in the `export` folder. (Note: This assumes `vba_model.json` already exists in the current directory).
 ```bash
-vbalidator ./export
+# Smoke a folder of Excel modules
+vbalidator ./MyModules --host excel
+
+# Force 32-bit Office assumptions
+vbalidator ./MyModules --define WIN64=False,VBA7=False
+
+# CI gate — fail the build below 95
+vbalidator ./vba --host excel --score-threshold 95
+
+# Pure-error gate (no warning noise)
+vbalidator ./vba --host excel --no-strict --quiet
+
+# Static + dynamic cross-check (Windows + Office only)
+vbalidator ./vba --host excel --roundtrip
 ```
 
-#### Conditional Compilation
-Simulate a 64-bit environment.
-```bash
-vbalidator ./export --define "Win64=True,VBA7=True"
+## Python API
+
+```python
+from vbalidator import precheck, PrecheckResult
+
+result: PrecheckResult = precheck(
+    source="./MyModules",        # str | Path | inline source
+    host="excel",                # excel | word | access | outlook | None
+    model_path="my.json",        # extra custom model
+    defines={"WIN64": False},
+    strict=True,                 # warnings count toward score
+    module_type=None,            # override for inline strings
+    roundtrip=False,             # Windows + Office only
+)
+
+result.score          # 0..100
+result.compile_safe   # True / False
+result.errors         # list[Issue]
+result.warnings       # list[Issue]
+result.info           # list[Issue]
+result.issues         # full list, normalised
+result.json()         # canonical JSON v2 report
+
+bool(result)          # truthy when compile_safe
 ```
 
-#### Custom Object Model
-Use a specific object model definition generated by the exporter.
-```bash
-vbalidator ./export --model ./custom_model.json
+For inline strings without an associated path, prefer
+`precheck_source(code, name="<my-snippet>", host="excel")`.
+
+### Issue shape (JSON v2)
+
+```json
+{
+  "rule_id": "VBA001",
+  "severity": "error",
+  "category": "name_resolution",
+  "file": "Module1.bas",
+  "line": 42,
+  "column": 0,
+  "message": "Undefined identifier 'tpyo' in 'DoStuff'."
+}
 ```
 
-### Running the Demo
-A `demo/` folder is included to showcase the tool's capabilities. It contains files with intentional errors.
+`severity` is one of `error`, `warning`, `info`, or `compile_verified`
+(round-trip).
+
+### Rule IDs
+
+Every emitted finding carries a stable `rule_id` documented at
+[Rules](rules/index.md). Use them in CI ignore lists:
 
 ```bash
-vbalidator ./demo
+vbalidator ./vba --host excel | jq '.issues[] | select(.rule_id != "VBA320")'
 ```
 
-Expected output includes:
-*   Undefined variables (`x`, `unknown_var`)
-*   Duplicate declarations (`Dim y`)
-*   Invalid constant initialization (`Const InvalidConst = UndefinedConstant`)
-*   Invalid procedure calls (`res = z(10)`)
-*   Missing members (`Me.InvalidMethod`, `i.SomeMethod`)
+## Configuration files
 
-### What is NOT Covered
-While VBAlidator is a powerful static analysis tool, it is not a full VBA compiler. Some compile-time and run-time errors may not be detected:
-
-*   **Late Binding:** Calls to objects declared as `Object` or `Variant` are not validated.
-*   **Complex Flow Analysis:** Uninitialized variables (used before assignment) or complex `GoTo` logic (jumping into blocks) are not fully analyzed.
-*   **Runtime Logic:** Errors like "Division by zero" or "Index out of bounds" are runtime errors and are outside the scope of static analysis.
-
-## Output
-
-The tool provides two types of output:
-
-1.  **Console Output:** Colored logs indicating the file, line number, and error message.
-    ```
-    Module1.bas:10: Undefined identifier 'MyVar' in 'MySub'.
-    ```
-
-2.  **JSON Report:** A machine-readable report saved to the specified output path.
-    ```json
-    {
-      "summary": {
-        "files_scanned": 5,
-        "issues_found": 1
-      },
-      "issues": [
-        {
-          "file": "Module1.bas",
-          "line": 10,
-          "message": "Undefined identifier 'MyVar' in 'MySub'."
-        }
-      ]
-    }
-    ```
+`vba_model.json` next to the working directory is auto-loaded if no
+`--model` is given. See [Configuration](Configuration.md) for the
+schema and how to generate one with the bundled
+`tools/VBA_Model_Exporter.bas`.
