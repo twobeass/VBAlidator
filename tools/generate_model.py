@@ -101,18 +101,16 @@ def _extract_member_args(method_tuple: tuple) -> list[dict[str, Any]]:
         if not isinstance(flags, (list, tuple)):
             continue
 
-        arg_type = "Variant"
+        # comtypes wraps types as classes (HRESULT, c_int, …) — use the
+        # class name when present, otherwise the repr (good enough for
+        # documentation purposes).
         type_obj = arg_def[1]
-        if hasattr(type_obj, "__name__"):
-            arg_type = type_obj.__name__
-        else:
-            arg_type = str(type_obj)
+        arg_type = getattr(type_obj, "__name__", None) or str(type_obj)
 
-        arg_name = "Unknown"
-        try:
-            arg_name = str(arg_def[2])
-        except (TypeError, ValueError):
-            pass
+        # `str()` is essentially infallible on Python objects; if a COM
+        # binding ever exposed a `__str__` that raised we'd rather see
+        # the traceback than swallow it silently.
+        arg_name = str(arg_def[2])
 
         if "out" in flags or ("in" not in flags and "out" not in flags):
             mechanism = "ByRef"
