@@ -116,3 +116,40 @@ jobs:
           assert d['summary']['compile_safe'], d['summary']
           print(f\"clean OK: score={d['summary']['score']}\")
           "
+      - name: vbalidator --roundtrip on Linux falls back gracefully
+        run: |
+          # Off-Windows the round-trip must emit info VBA_RT000 and exit
+          # cleanly when the source is otherwise compile-safe.
+          vbalidator tests/samples/valid_code/valid_sample.bas \
+            --output /tmp/rt.json --quiet --no-strict --roundtrip
+          python -c "
+          import json
+          d = json.load(open('/tmp/rt.json'))
+          assert d['summary']['compile_safe']
+          assert any(i.get('rule_id') == 'VBA_RT000' for i in d['issues']), d['issues']
+          print('roundtrip fallback OK')
+          "
+
+  docs:
+    name: Rule docs in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+      - name: Regenerate rule catalogue
+        run: python tools/generate_rule_docs.py
+      - name: Fail when docs are out of sync
+        run: |
+          if ! git diff --quiet docs/rules/; then
+            echo "::error::docs/rules/ is out of sync with src/rules.py."
+            echo "Run \`python tools/generate_rule_docs.py\` and commit the result."
+            git --no-pager diff docs/rules/
+            exit 1
+          fi

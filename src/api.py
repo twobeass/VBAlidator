@@ -122,6 +122,7 @@ def precheck(
     defines: dict[str, Any] | None = None,
     strict: bool = True,
     module_type: str | None = None,
+    roundtrip: bool = False,
 ) -> PrecheckResult:
     """Run the full VBAlidator pipeline.
 
@@ -199,6 +200,39 @@ def precheck(
         analyzer.add_module(module_node)
 
     raw_issues = analyzer.analyze()
+
+    # Phase 4.5 — optional dynamic verification through Office COM.
+    if roundtrip:
+        try:
+            from .roundtrip import is_available, availability_reason, verify_compile
+            if not is_available():
+                raw_issues.append({
+                    "file": "<roundtrip>", "line": 0,
+                    "rule_id": "VBA_RT000", "severity": "info",
+                    "category": "roundtrip",
+                    "message": f"Round-trip verification unavailable: {availability_reason()}",
+                })
+            else:
+                # Round-trip every input file individually so the per-file
+                # error attribution stays correct.
+                for filename, content in files:
+                    rt_issues = verify_compile(
+                        content,
+                        host=(host or "excel"),
+                    )
+                    # Re-attribute the file name (verify_compile uses the
+                    # injected component name by default).
+                    for i in rt_issues:
+                        i["file"] = filename
+                    raw_issues.extend(rt_issues)
+        except Exception as exc:  # pragma: no cover — defence-in-depth
+            raw_issues.append({
+                "file": "<roundtrip>", "line": 0,
+                "rule_id": "VBA_RT000", "severity": "info",
+                "category": "roundtrip",
+                "message": f"Round-trip verification crashed: {exc}",
+            })
+
     issues = normalize_issues(raw_issues)
 
     if not strict:

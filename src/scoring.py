@@ -23,9 +23,13 @@ from typing import Iterable
 
 
 SEVERITY_WEIGHTS = {
+    # Static-analysis findings.
     "error": 20,
     "warning": 3,
     "info": 1,
+    # Round-trip dynamic verification (Phase 4.5). Treated as a hard
+    # error because VBE itself refused to compile.
+    "compile_verified": 30,
 }
 
 
@@ -56,10 +60,16 @@ def compute_score(issues: Iterable[dict], coverage_uncertain: bool = False) -> t
     return score, breakdown
 
 
+_BLOCKING_SEVERITIES = {"error", "compile_verified"}
+
+
 def is_compile_safe(issues: Iterable[dict]) -> bool:
-    """A run is `compile_safe` only when zero severity=error findings exist.
-    Warnings and info do not block."""
+    """A run is `compile_safe` only when zero blocking findings exist.
+
+    Blocking severities are static `error` and dynamic `compile_verified`
+    (round-trip). Warnings and info do not block.
+    """
     for i in issues:
-        if i.get("severity", "error") == "error":
+        if i.get("severity", "error") in _BLOCKING_SEVERITIES:
             return False
     return True

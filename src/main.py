@@ -12,6 +12,7 @@ init(autoreset=True)
 def _color_for_severity(sev):
     return {
         "error": Fore.RED,
+        "compile_verified": Fore.RED,
         "warning": Fore.YELLOW,
         "info": Fore.CYAN,
     }.get(sev, Fore.WHITE)
@@ -79,6 +80,15 @@ def main():
         action="store_true",
         help="Suppress per-issue console output. Only print summary + score.",
     )
+    parser.add_argument(
+        "--roundtrip",
+        action="store_true",
+        help="Drive the actual VBE compiler through Office COM as a "
+             "second-opinion check (Windows + Office only). Each compile "
+             "error returned by VBE is reported with severity "
+             "'compile_verified'. Falls back to a single info-level "
+             "notice when the platform / Python bindings are missing.",
+    )
 
     args = parser.parse_args()
 
@@ -109,6 +119,7 @@ def main():
             model_path=args.model,
             defines=defines,
             strict=args.strict,
+            roundtrip=args.roundtrip,
         )
     except Exception as exc:  # surface unexpected pipeline failures
         print(Fore.RED + f"Pipeline error: {exc}")
