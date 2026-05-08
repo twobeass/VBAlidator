@@ -1,0 +1,140 @@
+{
+  "globals": {
+    "ActiveDocument": { "type": "Document" },
+    "ActiveWindow": { "type": "Window" },
+    "ThisDocument": { "type": "Document" },
+    "Application": { "type": "Application" },
+    "Documents": { "type": "Documents" },
+    "Selection": { "type": "Selection" },
+    "Options": { "type": "Object" },
+    "wdAlignParagraphLeft": { "type": "Long" },
+    "wdAlignParagraphCenter": { "type": "Long" },
+    "wdAlignParagraphRight": { "type": "Long" },
+    "wdAlignParagraphJustify": { "type": "Long" },
+    "wdCharacter": { "type": "Long" },
+    "wdWord": { "type": "Long" },
+    "wdSentence": { "type": "Long" },
+    "wdParagraph": { "type": "Long" },
+    "wdLine": { "type": "Long" },
+    "wdStory": { "type": "Long" },
+    "wdMove": { "type": "Long" },
+    "wdExtend": { "type": "Long" },
+    "wdCollapseStart": { "type": "Long" },
+    "wdCollapseEnd": { "type": "Long" },
+    "wdReplaceNone": { "type": "Long" },
+    "wdReplaceOne": { "type": "Long" },
+    "wdReplaceAll": { "type": "Long" },
+    "wdFindAsk": { "type": "Long" },
+    "wdFindContinue": { "type": "Long" },
+    "wdFindStop": { "type": "Long" },
+    "wdSaveChanges": { "type": "Long" },
+    "wdDoNotSaveChanges": { "type": "Long" },
+    "wdPromptToSaveChanges": { "type": "Long" },
+    "wdFormatDocument": { "type": "Long" },
+    "wdFormatXMLDocument": { "type": "Long" },
+    "wdFormatXMLDocumentMacroEnabled": { "type": "Long" }
+  },
+  "classes": {
+    "Application": {
+      "members": {
+        "ActiveDocument": { "type": "Document" },
+        "ActiveWindow": { "type": "Window" },
+        "Documents": { "type": "Documents" },
+        "Selection": { "type": "Selection" },
+        "Quit": { "type": "Sub" },
+        "Run": { "type": "Function", "returns": "Variant" },
+        "ScreenUpdating": { "type": "Boolean" },
+        "DisplayAlerts": { "type": "Long" },
+        "Name": { "type": "String" },
+        "Path": { "type": "String" },
+        "Version": { "type": "String" }
+      }
+    },
+    "Documents": {
+      "members": {
+        "Add": { "type": "Function", "returns": "Document", "min_args": 0, "max_args": 4 },
+        "Open": { "type": "Function", "returns": "Document", "min_args": 1, "max_args": 17 },
+        "Close": { "type": "Sub" },
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Document", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "Document": {
+      "members": {
+        "Content": { "type": "Range" },
+        "Range": { "type": "Function", "returns": "Range", "min_args": 0, "max_args": 2 },
+        "Paragraphs": { "type": "Object" },
+        "Sentences": { "type": "Object" },
+        "Words": { "type": "Object" },
+        "Tables": { "type": "Object" },
+        "Bookmarks": { "type": "Object" },
+        "Sections": { "type": "Object" },
+        "Save": { "type": "Sub" },
+        "SaveAs": { "type": "Sub" },
+        "Close": { "type": "Sub" },
+        "Activate": { "type": "Sub" },
+        "PrintOut": { "type": "Sub" },
+        "Name": { "type": "String" },
+        "FullName": { "type": "String" },
+        "Path": { "type": "String" },
+        "Saved": { "type": "Boolean" },
+        "Application": { "type": "Application" }
+      }
+    },
+    "Range": {
+      "members": {
+        "Text": { "type": "String" },
+        "Start": { "type": "Long" },
+        "End": { "type": "Long" },
+        "Font": { "type": "Object" },
+        "Bold": { "type": "Long" },
+        "Italic": { "type": "Long" },
+        "Underline": { "type": "Long" },
+        "Find": { "type": "Object" },
+        "Select": { "type": "Sub" },
+        "Copy": { "type": "Sub" },
+        "Cut": { "type": "Sub" },
+        "Paste": { "type": "Sub" },
+        "InsertAfter": { "type": "Sub" },
+        "InsertBefore": { "type": "Sub" },
+        "Delete": { "type": "Function", "returns": "Long" },
+        "Collapse": { "type": "Sub" },
+        "MoveStart": { "type": "Function", "returns": "Long" },
+        "MoveEnd": { "type": "Function", "returns": "Long" },
+        "Words": { "type": "Object" },
+        "Sentences": { "type": "Object" },
+        "Paragraphs": { "type": "Object" }
+      }
+    },
+    "Selection": {
+      "members": {
+        "Text": { "type": "String" },
+        "Range": { "type": "Range" },
+        "TypeText": { "type": "Sub" },
+        "TypeParagraph": { "type": "Sub" },
+        "MoveLeft": { "type": "Function", "returns": "Long" },
+        "MoveRight": { "type": "Function", "returns": "Long" },
+        "MoveUp": { "type": "Function", "returns": "Long" },
+        "MoveDown": { "type": "Function", "returns": "Long" },
+        "HomeKey": { "type": "Sub" },
+        "EndKey": { "type": "Sub" },
+        "Find": { "type": "Object" },
+        "Bold": { "type": "Long" },
+        "Italic": { "type": "Long" },
+        "Font": { "type": "Object" },
+        "Start": { "type": "Long" },
+        "End": { "type": "Long" }
+      }
+    },
+    "Window": {
+      "members": {
+        "Visible": { "type": "Boolean" },
+        "Caption": { "type": "String" },
+        "Selection": { "type": "Selection" },
+        "View": { "type": "Object" },
+        "Activate": { "type": "Sub" },
+        "Close": { "type": "Sub" }
+      }
+    }
+  }
+}

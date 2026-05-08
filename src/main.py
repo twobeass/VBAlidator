@@ -1,138 +1,156 @@
 import argparse
+import json
 import os
 import sys
-import json
-from colorama import init, Fore
+from colorama import init, Fore, Style
 
-from .config import Config
-from .lexer import Lexer
-from .preprocessor import Preprocessor
-from .parser import VBAParser, FormParser
-from .analyzer import Analyzer
+from .api import precheck
 
 init(autoreset=True)
 
+
+def _color_for_severity(sev):
+    return {
+        "error": Fore.RED,
+        "warning": Fore.YELLOW,
+        "info": Fore.CYAN,
+    }.get(sev, Fore.WHITE)
+
+
+def _color_for_score(score):
+    if score >= 90:
+        return Fore.GREEN
+    if score >= 70:
+        return Fore.YELLOW
+    return Fore.RED
+
+
 def main():
-    parser = argparse.ArgumentParser(description="VBAlidator - VBA Static Analysis Tool")
-    parser.add_argument("input_folder", help="Path to the folder containing VBA files")
-    parser.add_argument("--define", help="Conditional compilation constants (e.g. 'WIN64=True,VBA7=True')")
-    parser.add_argument("--model", help="Path to a custom JSON object model definition file")
-    parser.add_argument("--output", help="Path to save the JSON report", default="vba_report.json")
-    
+    parser = argparse.ArgumentParser(
+        description="VBAlidator — VBA static analyser & compile-safety prechecker"
+    )
+    parser.add_argument(
+        "input_path",
+        help="Path to a VBA file (.bas/.cls/.frm) or a folder containing them.",
+    )
+    parser.add_argument(
+        "--define",
+        help="Conditional compilation constants, e.g. 'WIN64=True,VBA7=True'",
+    )
+    parser.add_argument(
+        "--model",
+        help="Path to a custom JSON object model definition file.",
+    )
+    parser.add_argument(
+        "--host",
+        choices=["excel", "word", "access", "outlook"],
+        help="Built-in host model to load (Excel/Word/Access/Outlook). "
+             "When set, the bundled models/<host>.json is layered on top of "
+             "the standard model so the user does not need to run the "
+             "VBA_Model_Exporter.bas first.",
+    )
+    parser.add_argument(
+        "--output",
+        default="vba_report.json",
+        help="Path to write the JSON v2 report (default: vba_report.json).",
+    )
+    parser.add_argument(
+        "--score-threshold",
+        type=int,
+        default=90,
+        help="Minimum confidence score to consider the input compile-safe "
+             "(default 90). The CLI exits non-zero when the score is below "
+             "this value or when there is at least one severity=error issue.",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=True,
+        help="Count severity=warning toward the gating set (default).",
+    )
+    parser.add_argument(
+        "--no-strict",
+        dest="strict",
+        action="store_false",
+        help="Ignore warnings/info for gating; only errors block.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-issue console output. Only print summary + score.",
+    )
+
     args = parser.parse_args()
-    
-    # 1. Configuration
-    config = Config()
+
+    if not os.path.exists(args.input_path):
+        print(Fore.RED + f"Error: input path '{args.input_path}' does not exist.")
+        sys.exit(2)
+
+    defines = {}
     if args.define:
-        config.parse_defines(args.define)
+        for pair in args.define.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                low = v.strip().lower()
+                if low == "true":
+                    defines[k.strip().upper()] = True
+                elif low == "false":
+                    defines[k.strip().upper()] = False
+                else:
+                    defines[k.strip().upper()] = v.strip()
+
+    print(Fore.CYAN + f"VBAlidator: scanning {args.input_path}"
+          + (f" (host={args.host})" if args.host else ""))
 
     try:
-        if args.model:
-            config.load_model(args.model)
-        elif os.path.exists("vba_model.json"):
-            print(Fore.CYAN + "Loading implicit model: vba_model.json")
-            config.load_model("vba_model.json")
-    except Exception as e:
-        print(Fore.RED + f"Error loading model: {e}")
-        sys.exit(1)
+        result = precheck(
+            args.input_path,
+            host=args.host,
+            model_path=args.model,
+            defines=defines,
+            strict=args.strict,
+        )
+    except Exception as exc:  # surface unexpected pipeline failures
+        print(Fore.RED + f"Pipeline error: {exc}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(3)
 
-    analyzer = Analyzer(config)
-    
-    # 2. File Discovery
-    if not os.path.exists(args.input_folder):
-        print(Fore.RED + f"Error: Input folder '{args.input_folder}' does not exist.")
-        sys.exit(1)
+    # Console output
+    if not args.quiet:
+        for issue in result.issues:
+            sev_color = _color_for_severity(issue.get("severity", "error"))
+            print(
+                f"{Fore.MAGENTA}{issue.get('file','')}:{issue.get('line',0)}: "
+                f"{sev_color}{issue.get('severity','error').upper()}{Style.RESET_ALL}  "
+                f"{Fore.WHITE}[{issue.get('rule_id','VBA000')}]  "
+                f"{issue.get('message','')}"
+            )
 
-    files = []
-    for root, _, filenames in os.walk(args.input_folder):
-        for f in filenames:
-            if f.lower().endswith(('.cls', '.bas', '.frm')):
-                files.append(os.path.join(root, f))
-                
-    print(Fore.CYAN + f"Found {len(files)} VBA files in {args.input_folder} and subdirectories")
+    # Summary block
+    s = result.json()["summary"]
+    score_color = _color_for_score(result.score)
+    print()
+    print(f"{Fore.CYAN}Files scanned : {Style.RESET_ALL}{s['files_scanned']}")
+    print(f"{Fore.CYAN}Errors        : {Fore.RED}{s['errors']}")
+    print(f"{Fore.CYAN}Warnings      : {Fore.YELLOW}{s['warnings']}")
+    print(f"{Fore.CYAN}Info          : {Fore.WHITE}{s['info']}")
+    print(f"{Fore.CYAN}Confidence    : {score_color}{result.score} / 100"
+          f"  {'(compile-safe)' if result.compile_safe else '(needs fixes)'}")
 
-    # 3. Processing Loop
-    for filepath in files:
-        filename = os.path.relpath(filepath, args.input_folder)
-        try:
-            with open(filepath, 'r', encoding='latin-1') as f: # VBA export is often latin-1 or cp1252
-                content = f.read()
-            
-            # Determine module type
-            ext = os.path.splitext(filename)[1].lower()
-            module_type = 'Module'
-            if ext == '.cls': module_type = 'Class'
-            elif ext == '.frm': module_type = 'Form'
-            
-            # Form Handling
-            controls = []
-            code_content = content
-            if ext == '.frm':
-                fp = FormParser()
-                controls = fp.parse(content)
-                # Find where code attributes start to skip Form definition header
-                import re
-                # Find the start of Attributes
-                match = re.search(r'Attribute\s+VB_Name', content)
-                if match:
-                    code_content = content[match.start():]
-            
-            # Lexer
-            lexer = Lexer(code_content)
-            tokens = list(lexer.tokenize())
+    # JSON output
+    try:
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(result.json(), f, indent=2)
+        print(f"{Fore.CYAN}Report saved  : {Style.RESET_ALL}{args.output}")
+    except OSError as exc:
+        print(Fore.RED + f"Could not write report: {exc}")
+        sys.exit(4)
 
-            # Surface any lexer errors (previously silently dropped)
-            for lex_err in lexer.errors:
-                analyzer.errors.append(lex_err.to_dict(filename=filename))
+    # Exit code: 0 only when score >= threshold and no errors.
+    blocking = (not result.compile_safe) or (result.score < args.score_threshold)
+    sys.exit(1 if blocking else 0)
 
-            # Preprocessor
-            pp = Preprocessor(tokens, config.definitions)
-            processed_tokens = list(pp.process())
-            
-            # Parser
-            parser = VBAParser(processed_tokens, filename=filename)
-            module_node = parser.parse_module()
-            module_node.filename = filename
-            module_node.module_type = module_type
-
-            # Surface syntax errors collected by the parser
-            for syn_err in parser.errors:
-                analyzer.errors.append(syn_err)
-
-            # Add controls to module variables if Form
-            if ext == '.frm':
-                module_node.variables.extend(controls)
-
-            analyzer.add_module(module_node)
-            
-        except Exception as e:
-            print(Fore.RED + f"Error processing {filename}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # 4. Analysis
-    print(Fore.YELLOW + "Analyzing...")
-    errors = analyzer.analyze()
-
-    # 5. Reporting
-    print(Fore.GREEN + f"Analysis Complete. Found {len(errors)} potential issues.")
-    
-    report_data = {
-        "summary": {
-            "files_scanned": len(files),
-            "issues_found": len(errors)
-        },
-        "issues": errors
-    }
-    
-    # Console Output
-    for err in errors:
-        print(f"{Fore.MAGENTA}{err['file']}:{err['line']}: {Fore.RED}{err['message']}")
-
-    # JSON Output
-    with open(args.output, 'w') as f:
-        json.dump(report_data, f, indent=2)
-    print(Fore.CYAN + f"Report saved to {args.output}")
 
 if __name__ == "__main__":
     main()

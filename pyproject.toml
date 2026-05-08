@@ -28,7 +28,7 @@ where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.json"]
+"*" = ["*.json", "models/*.json"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

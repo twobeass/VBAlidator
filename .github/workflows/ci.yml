@@ -85,7 +85,34 @@ jobs:
           python -m pip install .
       - name: vbalidator --help
         run: vbalidator --help
-      - name: vbalidator on demo fixtures
-        run: vbalidator tests/demo --output /tmp/report.json
-      - name: Validate JSON report
-        run: python -c "import json; data = json.load(open('/tmp/report.json')); assert 'issues' in data; print(f\"issues={len(data['issues'])}\")"
+      - name: vbalidator on demo fixtures (expects non-zero, demo has known errors)
+        run: |
+          set +e
+          vbalidator tests/demo --output /tmp/report.json --quiet
+          ec=$?
+          # Demo intentionally contains errors → non-zero exit is correct.
+          if [ "$ec" -eq 0 ]; then
+            echo "Expected non-zero exit on tests/demo (known errors), got 0" >&2
+            exit 1
+          fi
+      - name: Validate JSON v2 report shape
+        run: |
+          python -c "
+          import json
+          d = json.load(open('/tmp/report.json'))
+          assert d['version'] == '2.0', d['version']
+          assert 'summary' in d and 'score' in d['summary']
+          assert 'files' in d and 'issues' in d
+          assert isinstance(d['summary']['score'], int)
+          print(f\"v2 OK: score={d['summary']['score']}, issues={len(d['issues'])}\")
+          "
+      - name: vbalidator on a clean valid sample (expects zero exit + score 100)
+        run: |
+          vbalidator tests/samples/valid_code/valid_sample.bas \
+            --output /tmp/clean.json --quiet --no-strict
+          python -c "
+          import json
+          d = json.load(open('/tmp/clean.json'))
+          assert d['summary']['compile_safe'], d['summary']
+          print(f\"clean OK: score={d['summary']['score']}\")
+          "

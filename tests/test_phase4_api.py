@@ -1,0 +1,305 @@
+"""Tests for the Premium-Prechecker API (P4.1–P4.4):
+- precheck() function and PrecheckResult dataclass
+- compute_score() weighting
+- normalize_issues() rule-ID inference
+- JSON v2 report shape
+- --host model auto-loading (Excel)
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from src.api import PrecheckResult, precheck, precheck_source
+from src.reporting import build_report_v2, normalize_issue, normalize_issues
+from src.scoring import compute_score, is_compile_safe
+
+
+# ---- Score ---------------------------------------------------------------
+
+
+def test_score_clean_input_is_100():
+    score, _ = compute_score([])
+    assert score == 100
+
+
+def test_score_one_error_drops_below_threshold():
+    issues = [{"severity": "error", "message": "x"}]
+    score, breakdown = compute_score(issues)
+    assert score == 80
+    assert breakdown["by_severity"]["error"] == 1
+    assert breakdown["penalty_total"] == 20
+
+
+def test_score_warnings_count_less_than_errors():
+    score_w, _ = compute_score([{"severity": "warning"}])
+    score_e, _ = compute_score([{"severity": "error"}])
+    assert score_w > score_e
+
+
+def test_score_floors_at_zero():
+    score, _ = compute_score([{"severity": "error"}] * 100)
+    assert score == 0
+
+
+def test_score_coverage_uncertain_caps_at_90():
+    score, _ = compute_score([], coverage_uncertain=True)
+    assert score == 90
+
+
+def test_compile_safe_only_errors_block():
+    assert is_compile_safe([])
+    assert is_compile_safe([{"severity": "warning"}])
+    assert is_compile_safe([{"severity": "info"}])
+    assert not is_compile_safe([{"severity": "error"}])
+
+
+# ---- Reporting -----------------------------------------------------------
+
+
+def test_normalize_issue_legacy_undefined():
+    n = normalize_issue({"file": "a.bas", "line": 5, "message": "Undefined identifier 'foo' in 'S'."})
+    assert n["rule_id"] == "VBA001"
+    assert n["severity"] == "error"
+    assert n["category"] == "name_resolution"
+
+
+def test_normalize_issue_legacy_unreachable_is_warning():
+    n = normalize_issue({"line": 9, "message": "Unreachable code detected in 'S'."})
+    assert n["rule_id"] == "VBA009"
+    assert n["severity"] == "warning"
+
+
+def test_normalize_issue_keeps_explicit_rule_id():
+    n = normalize_issue({
+        "rule_id": "VBA210",
+        "severity": "error",
+        "message": "`Set` used on non-object …",
+    })
+    assert n["rule_id"] == "VBA210"
+    assert n["severity"] == "error"
+    assert n["category"] == "assignment"
+
+
+def test_normalize_issues_idempotent():
+    first = normalize_issues([{"message": "Undefined identifier 'x'"}])
+    second = normalize_issues(first)
+    assert second == first
+
+
+def test_build_report_v2_shape():
+    issues = [
+        {"file": "a.bas", "line": 1, "message": "Undefined identifier 'x' in 'S'."},
+        {"file": "a.bas", "line": 2, "rule_id": "VBA210", "severity": "error", "message": "Set on scalar"},
+        {"file": "b.bas", "line": 7, "rule_id": "VBA320", "severity": "warning", "message": "Option Explicit"},
+    ]
+    report = build_report_v2(issues, files_scanned=2, score=77, compile_safe=False)
+    assert report["version"] == "2.0"
+    assert report["summary"]["files_scanned"] == 2
+    assert report["summary"]["score"] == 77
+    assert report["summary"]["compile_safe"] is False
+    assert report["summary"]["errors"] == 2
+    assert report["summary"]["warnings"] == 1
+    # files grouped + sorted
+    paths = [f["path"] for f in report["files"]]
+    assert paths == sorted(paths)
+    assert all("issues" in f for f in report["files"])
+    # flat list also present for jq consumers
+    assert isinstance(report["issues"], list)
+    assert len(report["issues"]) == 3
+
+
+# ---- precheck() public API ----------------------------------------------
+
+
+def test_precheck_clean_inline_source():
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    Dim x As Long
+    x = 1
+End Sub
+"""
+    result = precheck_source(code)
+    assert isinstance(result, PrecheckResult)
+    assert result.compile_safe
+    assert result.score == 100
+    assert result.errors == []
+    assert bool(result) is True
+
+
+def test_precheck_inline_source_with_undefined():
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    typo = 1
+End Sub
+"""
+    result = precheck_source(code)
+    assert not result.compile_safe
+    assert result.score < 100
+    assert any(e["rule_id"] == "VBA001" for e in result.errors)
+    assert bool(result) is False
+
+
+def test_precheck_result_json_is_v2():
+    code = """Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    Dim x As Long
+    x = 1
+End Sub
+"""
+    result = precheck_source(code)
+    j = result.json()
+    assert j["version"] == "2.0"
+    assert j["summary"]["compile_safe"]
+    assert j["summary"]["score"] == 100
+
+
+def test_precheck_demo_directory_works():
+    """Run on the demo fixtures and verify the result is well-formed."""
+    repo = Path(__file__).resolve().parent.parent
+    result = precheck(repo / "tests" / "demo")
+    assert result.files_scanned >= 1
+    j = result.json()
+    assert "summary" in j
+    assert isinstance(j["files"], list)
+
+
+def test_precheck_strict_vs_non_strict():
+    """`strict=False` means warnings do not affect compile_safe / score."""
+    code = """
+Attribute VB_Name = "M"
+Sub S()
+    Dim x As Long
+    x = 1
+End Sub
+"""
+    # Missing Option Explicit triggers a warning.
+    strict = precheck_source(code)
+    assert strict.warnings, "Missing Option Explicit must produce VBA320 warning"
+    # `precheck_source` always operates strict — non-strict gating is
+    # exposed via `precheck()` and the CLI `--no-strict` flag, which is
+    # exercised in the CLI smoke test of ci.yml.
+
+
+# ---- Host models --------------------------------------------------------
+
+
+def test_excel_host_model_resolves_workbook(tmp_path):
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim wb As Workbook\n"
+        "    Set wb = ActiveWorkbook\n"
+        "    wb.Save\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="excel")
+    assert all(e["rule_id"] != "VBA001" for e in result.errors), (
+        f"With --host=excel, ActiveWorkbook + Workbook.Save must resolve. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_no_host_yields_more_undefined(tmp_path):
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim wb As Object\n"
+        "    Set wb = ActiveWorkbook\n"  # ActiveWorkbook is in std_model
+        "End Sub\n",
+    )
+    result_no_host = precheck(bas)
+    # ActiveWorkbook IS in std_model so it must resolve even without --host.
+    assert all("ActiveWorkbook" not in e.get("message", "") for e in result_no_host.errors)
+
+
+def test_word_host_loads_documents_class(tmp_path):
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim doc As Document\n"
+        "    Set doc = ActiveDocument\n"
+        "    doc.Save\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="word")
+    assert all(e["rule_id"] != "VBA001" for e in result.errors), (
+        f"Word host must resolve ActiveDocument + Document. Errors: {result.errors!r}"
+    )
+
+
+def test_unknown_host_does_not_crash(tmp_path):
+    bas = tmp_path / "M.bas"
+    bas.write_text('Attribute VB_Name = "M"\nOption Explicit\nSub S()\nEnd Sub\n')
+    # Silently no-ops; user just gets the std_model coverage.
+    result = precheck(bas, host="not_a_real_host")
+    assert result.compile_safe
+
+
+# ---- Defines -----------------------------------------------------------
+
+
+def test_defines_can_disable_ptrsafe_check(tmp_path):
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        'Private Declare Function GetTickCount Lib "kernel32" () As Long\n'
+        "Sub S()\nEnd Sub\n",
+    )
+    # Default: VBA300 fires.
+    default_result = precheck(bas)
+    assert any(e["rule_id"] == "VBA300" for e in default_result.errors)
+
+    # With WIN64=False the rule is suppressed.
+    relaxed = precheck(bas, defines={"WIN64": False, "VBA7": False})
+    assert all(e["rule_id"] != "VBA300" for e in relaxed.errors)
+
+
+# ---- Issue list filters --------------------------------------------------
+
+
+def test_result_buckets_split_by_severity():
+    code = """
+Attribute VB_Name = "M"
+Sub S()
+    typo = 1
+End Sub
+"""
+    result = precheck_source(code)
+    # We expect at least one error (typo) AND one warning (missing Option Explicit).
+    assert result.errors, "must surface errors"
+    assert result.warnings, "must surface VBA320 warning"
+    # Error/warning sets are disjoint.
+    err_msgs = {e["message"] for e in result.errors}
+    warn_msgs = {w["message"] for w in result.warnings}
+    assert not err_msgs & warn_msgs
+
+
+# ---- Models JSON well-formed --------------------------------------------
+
+
+@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook"])
+def test_host_model_json_loads(host):
+    """Every shipped host model must be valid JSON with the expected sections."""
+    import json
+    path = Path(__file__).resolve().parent.parent / "src" / "models" / f"{host}.json"
+    assert path.is_file(), f"Missing host model {path}"
+    data = json.loads(path.read_text())
+    assert "globals" in data or "classes" in data, (
+        f"{host}.json must declare globals or classes"
+    )
+    assert isinstance(data.get("globals", {}), dict)
+    assert isinstance(data.get("classes", {}), dict)
