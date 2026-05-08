@@ -14,6 +14,15 @@ concurrency:
 permissions:
   contents: read
 
+# Make `bash` the default shell on every OS (including Windows) so
+# multi-line `run: |` blocks with `\`-continuations work consistently.
+# GitHub-hosted Windows runners ship Git Bash, so `bash` is always
+# available; the alternative (PowerShell) does not honour `\` as a
+# line-continuation and silently breaks multi-line scripts.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   lint:
     name: Lint (ruff)
@@ -55,12 +64,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
       - name: Run pytest
+        env:
+          # Force UTF-8 globally so Windows runners don't trip on the
+          # emoji severity badges in `docs/rules/*.md` when read by the
+          # rule-doc tests (cp1252 default would crash with
+          # UnicodeDecodeError).
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           pytest tests/ \
             --cov=src \
             --cov-report=xml \
             --cov-report=term \
-            -ra
+            -ra \
+            -v \
+            --tb=short
       - name: Upload coverage artifact
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
