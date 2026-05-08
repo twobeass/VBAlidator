@@ -41,19 +41,25 @@ class Lexer:
         self.errors = []
 
         # Regex patterns
+        # Identifiers may carry the legacy String type-suffix `$` directly
+        # appended (`Mid$`, `Left$`, `Trim$`, `Format$`, …). Bracket-quoted
+        # identifiers (`[A1]`, `[Sheet1!A1]`) are VBA's foreign-name escape
+        # used heavily in Excel/host integration.
         self.token_specs = [
             ('COMMENT', r"'.*"),
             ('STRING', r'"(""|[^"])*"'),
             ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
             ('DATELITERAL', r'\#[^#\r\n]+\#'),
             ('HEX', r'&H[0-9A-Fa-f]+'),
+            ('OCTAL', r'&O[0-7]+'),
             ('FLOAT', r'(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+'),
             ('INTEGER', r'\d+'),
             ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
-            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\]'), # Added : and \ to operator
-            ('IDENTIFIER', r'[a-zA-Z_]\w*'),
+            ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\!]'), # Added : \ ! to operator
+            ('BRACKET_IDENTIFIER', r'\[[^\]\r\n]*\]'),
+            ('IDENTIFIER', r'[a-zA-Z_]\w*\$?'),
             ('MISMATCH', r'.'),
         ]
 

@@ -23,10 +23,10 @@ AWESOME_DIR = Path(__file__).resolve().parent / "awesome_vba"
 # Initial baseline measured in PR #1 (Phase 0), each value is the current
 # ceiling — never a target. Lower me as the analyzer improves.
 BASELINE: dict[str, tuple[int, str]] = {
-    "JSONBag": (134, "baseline phase-0; references external JSON object model"),
-    "VBA-MemoryTools-master": (172, "baseline phase-0; heavy use of API declares"),
-    "VbTrickTimer-master": (59, "baseline phase-0; Win32 API + WithEvents"),
-    "stdVBA-master": (613, "baseline phase-0; large library, many helper macros"),
+    "JSONBag": (12, "baseline phase-1; ComctlLib types not in std model"),
+    "VBA-MemoryTools-master": (17, "baseline phase-1; LibMemory member resolution"),
+    "VbTrickTimer-master": (54, "baseline phase-1; many API declares + WithEvents"),
+    "stdVBA-master": (341, "baseline phase-1; large library, member-chain depth"),
 }
 
 

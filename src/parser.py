@@ -71,6 +71,60 @@ class IfNode(Node):
         self.else_blocks = else_blocks if else_blocks else [] # List of (condition_tokens, block)
         self.else_block = else_block
 
+
+class ForNode(Node):
+    """For i = a To b [Step c]    OR    For Each x In coll"""
+    def __init__(self, kind, var_token, header_tokens, body, line=0):
+        self.kind = kind            # 'counter' | 'each'
+        self.var_token = var_token  # Token for the loop variable name (may be None)
+        self.header_tokens = header_tokens
+        self.body = body
+        self.line = line
+
+
+class DoNode(Node):
+    """Do [While|Until cond] ... Loop [While|Until cond]    AND    While ... Wend"""
+    def __init__(self, condition_tokens, body, line=0, kind='do', condition_position='top'):
+        self.condition_tokens = condition_tokens
+        self.body = body
+        self.line = line
+        self.kind = kind  # 'do' | 'while_wend'
+        # 'top' = condition checked before body (Do While/Until/While); 'bottom' = post-test (Loop While/Until); 'none' = unconditional Do/Loop
+        self.condition_position = condition_position
+
+
+class CaseClauseNode(Node):
+    """One arm of a Select Case construct."""
+    def __init__(self, header_tokens, body, is_else=False):
+        self.header_tokens = header_tokens   # Token list after `Case` (without leading 'Case')
+        self.body = body                      # List of nodes
+        self.is_else = is_else
+
+
+class SelectNode(Node):
+    """Select Case <expr> ... End Select"""
+    def __init__(self, expr_tokens, cases, line=0):
+        self.expr_tokens = expr_tokens
+        self.cases = cases                   # List[CaseClauseNode]
+        self.line = line
+
+
+class RedimNode(Node):
+    """ReDim [Preserve] target(...) [As Type] [, ...]"""
+    def __init__(self, preserve, targets, raw_tokens, line=0):
+        self.preserve = preserve
+        self.targets = targets               # List of (name_token, dim_tokens, as_type_or_None)
+        self.raw_tokens = raw_tokens
+        self.line = line
+
+
+class EraseNode(Node):
+    """Erase target1, target2, ..."""
+    def __init__(self, targets, raw_tokens, line=0):
+        self.targets = targets               # List of name tokens
+        self.raw_tokens = raw_tokens
+        self.line = line
+
 class FormParser:
     """Parses the GUI definition block of .frm files."""
     def parse(self, content):
@@ -472,6 +526,12 @@ class VBAParser:
                 stmt = self.collect_statement()
                 nodes.append(StatementNode(stmt))
 
+            elif self.match('IDENTIFIER', 'ReDim'):
+                nodes.append(self.parse_redim())
+
+            elif self.match('IDENTIFIER', 'Erase'):
+                nodes.append(self.parse_erase())
+
             elif self.match('IDENTIFIER', 'Attribute'):
                 # Ignore attribute statements inside blocks
                 self.consume('IDENTIFIER', 'Attribute')
@@ -489,15 +549,22 @@ class VBAParser:
         return nodes
 
     def parse_while(self):
+        line = self.current_token.line
         self.consume('IDENTIFIER', 'While')
         condition_tokens = self.collect_statement()  # Everything until newline
-        
-        body = self.parse_block(end_markers=["Wend"])  # noqa: F841 — body wired up in Phase 1
-        
+
+        body = self.parse_block(end_markers=["Wend"])
+
         self.consume('IDENTIFIER', 'Wend')
         self.consume_statement()
-        
-        return StatementNode(condition_tokens) # Placeholder for WhileNode
+
+        return DoNode(
+            condition_tokens=condition_tokens,
+            body=body,
+            line=line,
+            kind='while_wend',
+            condition_position='top',
+        )
 
     def parse_with(self):
         self.consume('IDENTIFIER', 'With')
@@ -636,53 +703,268 @@ class VBAParser:
 
 
     def parse_for(self):
+        line = self.current_token.line
         self.consume('IDENTIFIER', 'For')
-        # ... = ... To ...
+
+        kind = 'counter'
+        var_token = None
+        header_tokens = []
+
+        if self.match('IDENTIFIER', 'Each'):
+            kind = 'each'
+            self.advance()  # consume 'Each'
+            if self.current_token.type == 'IDENTIFIER':
+                var_token = self.current_token
+
+        else:
+            if self.current_token.type == 'IDENTIFIER':
+                var_token = self.current_token
+
+        # Capture the header tokens up to NEWLINE so the analyzer can walk
+        # the iteration expression (range, collection, step, …).
         while self.current_token.type not in ('NEWLINE', 'EOF'):
+            header_tokens.append(self.current_token)
             self.advance()
         self.consume_statement()
-        
-        body = self.parse_block(end_markers=["Next"])  # noqa: F841 — body wired up in Phase 1
-        
+
+        body = self.parse_block(end_markers=["Next"])
+
         self.consume('IDENTIFIER', 'Next')
-        # Optional variable
+        # Optional variable name after Next (`Next i`).
         if self.current_token.type == 'IDENTIFIER':
             self.advance()
         self.consume_statement()
-        
-        return StatementNode([]) # Placeholder
+
+        return ForNode(
+            kind=kind,
+            var_token=var_token,
+            header_tokens=header_tokens,
+            body=body,
+            line=line,
+        )
 
     def parse_do(self):
+        line = self.current_token.line
         self.consume('IDENTIFIER', 'Do')
-        while self.current_token.type not in ('NEWLINE', 'EOF'):
-             self.advance()
+
+        # Optional top-tested condition: Do While <cond>  /  Do Until <cond>
+        condition_tokens = []
+        condition_position = 'none'
+        if self.match('IDENTIFIER', 'While') or self.match('IDENTIFIER', 'Until'):
+            self.advance()  # consume While/Until
+            condition_position = 'top'
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                condition_tokens.append(self.current_token)
+                self.advance()
+        else:
+            # Skip rest of header line (could be just `Do` followed by comment)
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                self.advance()
         self.consume_statement()
-        
-        body = self.parse_block(end_markers=["Loop"])  # noqa: F841 — body wired up in Phase 1
-        
+
+        body = self.parse_block(end_markers=["Loop"])
+
         self.consume('IDENTIFIER', 'Loop')
-        while self.current_token.type not in ('NEWLINE', 'EOF'):
-             self.advance()
+        # Optional bottom-tested condition: Loop While <cond>  /  Loop Until <cond>
+        if self.match('IDENTIFIER', 'While') or self.match('IDENTIFIER', 'Until'):
+            self.advance()
+            if condition_position == 'none':
+                condition_position = 'bottom'
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                condition_tokens.append(self.current_token)
+                self.advance()
+        else:
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                self.advance()
         self.consume_statement()
-        
-        return StatementNode([])
+
+        return DoNode(
+            condition_tokens=condition_tokens,
+            body=body,
+            line=line,
+            kind='do',
+            condition_position=condition_position,
+        )
 
     def parse_select(self):
+        line = self.current_token.line
         self.consume('IDENTIFIER', 'Select')
         self.consume('IDENTIFIER', 'Case')
+
+        # Capture the selector expression up to NEWLINE.
+        expr_tokens = []
         while self.current_token.type not in ('NEWLINE', 'EOF'):
+            expr_tokens.append(self.current_token)
             self.advance()
         self.consume_statement()
-        
-        # Select block ends with End Select
-        
-        body = self.parse_block(end_markers=["End Select"])  # noqa: F841 — body wired up in Phase 1
-        
+
+        # Skip stray newlines / comments before first Case.
+        cases = []
+        while self.current_token.type != 'EOF':
+            if self.match('NEWLINE') or self.match('COMMENT'):
+                self.advance()
+                continue
+
+            # End of select?
+            if self.match('IDENTIFIER', 'End'):
+                peek_val = self.peek().value.lower() if self.peek() else ''
+                if peek_val == 'select':
+                    break
+
+            if self.match('IDENTIFIER', 'Case'):
+                self.advance()
+                is_else = False
+                header_tokens = []
+
+                if self.match('IDENTIFIER', 'Else'):
+                    is_else = True
+                    self.advance()
+                else:
+                    while self.current_token.type not in ('NEWLINE', 'EOF'):
+                        header_tokens.append(self.current_token)
+                        self.advance()
+                self.consume_statement()
+
+                # Body of this case ends at the next Case / End Select.
+                case_body = self.parse_block(end_markers=["Case", "End Select"])
+                cases.append(CaseClauseNode(header_tokens, case_body, is_else=is_else))
+            else:
+                # Defensive: avoid infinite loop on malformed select.
+                self._record_syntax_error(
+                    f"Syntax Error: Expected 'Case' inside Select block, got '{self.current_token.value}'."
+                )
+                self.consume_statement()
+
         self.consume('IDENTIFIER', 'End')
         self.consume('IDENTIFIER', 'Select')
         self.consume_statement()
-        
-        return StatementNode([])
+
+        return SelectNode(expr_tokens=expr_tokens, cases=cases, line=line)
+
+    def parse_redim(self):
+        """ReDim [Preserve] target1(dims) [As Type] [, target2(...) ...]"""
+        line = self.current_token.line
+        raw_tokens = []
+        self.consume('IDENTIFIER', 'ReDim')
+
+        preserve = False
+        if self.match('IDENTIFIER', 'Preserve'):
+            preserve = True
+            raw_tokens.append(self.current_token)
+            self.advance()
+
+        targets = []
+        # Collect token-stream for simple ReDim parsing.
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                raw_tokens.append(self.current_token)
+                self.advance()
+                break
+
+            # Target name token
+            if self.current_token.type != 'IDENTIFIER':
+                raw_tokens.append(self.current_token)
+                self.advance()
+                continue
+
+            name_token = self.current_token
+            raw_tokens.append(name_token)
+            self.advance()
+
+            # Skip qualified name: foo.bar.baz
+            while self.match('OPERATOR', '.'):
+                raw_tokens.append(self.current_token)
+                self.advance()
+                if self.current_token.type == 'IDENTIFIER':
+                    name_token = self.current_token
+                    raw_tokens.append(name_token)
+                    self.advance()
+
+            # Dimension expression in parens
+            dim_tokens = []
+            if self.match('OPERATOR', '('):
+                paren_depth = 0
+                while self.current_token.type not in ('NEWLINE', 'EOF'):
+                    raw_tokens.append(self.current_token)
+                    if self.current_token.type == 'OPERATOR' and self.current_token.value == '(':
+                        paren_depth += 1
+                        if paren_depth > 1:
+                            dim_tokens.append(self.current_token)
+                    elif self.current_token.type == 'OPERATOR' and self.current_token.value == ')':
+                        paren_depth -= 1
+                        if paren_depth == 0:
+                            self.advance()
+                            break
+                        dim_tokens.append(self.current_token)
+                    else:
+                        dim_tokens.append(self.current_token)
+                    self.advance()
+
+            # Optional 'As Type'
+            as_type = None
+            if self.match('IDENTIFIER', 'As'):
+                raw_tokens.append(self.current_token)
+                self.advance()
+                # Capture type signature (best-effort, until comma/newline)
+                type_tokens = []
+                while self.current_token.type not in ('NEWLINE', 'EOF') \
+                        and not (self.current_token.type == 'OPERATOR' and self.current_token.value in (',', ':')):
+                    type_tokens.append(self.current_token)
+                    raw_tokens.append(self.current_token)
+                    self.advance()
+                as_type = ''.join(t.value for t in type_tokens).strip() or None
+
+            targets.append((name_token, dim_tokens, as_type))
+
+            # Comma → next target on same statement
+            if self.match('OPERATOR', ','):
+                raw_tokens.append(self.current_token)
+                self.advance()
+                continue
+            break
+
+        if self.current_token.type == 'NEWLINE':
+            self.advance()
+
+        return RedimNode(preserve=preserve, targets=targets, raw_tokens=raw_tokens, line=line)
+
+    def parse_erase(self):
+        """Erase target1, target2, ..."""
+        line = self.current_token.line
+        raw_tokens = []
+        self.consume('IDENTIFIER', 'Erase')
+
+        targets = []
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                raw_tokens.append(self.current_token)
+                self.advance()
+                break
+
+            if self.current_token.type == 'IDENTIFIER':
+                targets.append(self.current_token)
+                raw_tokens.append(self.current_token)
+                self.advance()
+                # Skip qualified name parts (foo.bar)
+                while self.match('OPERATOR', '.'):
+                    raw_tokens.append(self.current_token)
+                    self.advance()
+                    if self.current_token.type == 'IDENTIFIER':
+                        raw_tokens.append(self.current_token)
+                        self.advance()
+            else:
+                raw_tokens.append(self.current_token)
+                self.advance()
+
+            if self.match('OPERATOR', ','):
+                raw_tokens.append(self.current_token)
+                self.advance()
+                continue
+
+        if self.current_token.type == 'NEWLINE':
+            self.advance()
+
+        return EraseNode(targets=targets, raw_tokens=raw_tokens, line=line)
 
     def collect_statement(self, consume_newline=True):
         tokens = []

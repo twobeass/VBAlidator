@@ -1,4 +1,34 @@
-from .parser import ProcedureNode, WithNode, StatementNode, IfNode  # noqa: F401
+from .parser import (  # noqa: F401
+    CaseClauseNode,
+    DoNode,
+    EraseNode,
+    ForNode,
+    IfNode,
+    ProcedureNode,
+    RedimNode,
+    SelectNode,
+    StatementNode,
+    WithNode,
+)
+
+def _normalize_identifier(name):
+    """Strip VBA legacy type-suffix and bracket-quoting from an identifier.
+
+    - `Mid$` → `mid`
+    - `[A1]` → `a1`
+    - `x%`, `y&`, `z!`, `n#`, `c@` → `x`, `y`, `z`, `n`, `c`
+    """
+    if not name:
+        return name
+    n = name
+    # Bracket-quoted: [foo] → foo
+    if len(n) >= 2 and n[0] == '[' and n[-1] == ']':
+        n = n[1:-1]
+    # Trailing legacy type-suffix
+    if n and n[-1] in '%&!#@$':
+        n = n[:-1]
+    return n.lower()
+
 
 class SymbolTable:
     def __init__(self, name, parent=None, scope_type='Block'):
@@ -8,12 +38,12 @@ class SymbolTable:
         self.symbols = {} # name -> {type: ..., kind: Var/Proc/Class, extra: ...}
 
     def define(self, name, type_name, kind, extra=None):
-        self.symbols[name.lower()] = {"type": type_name, "kind": kind, "extra": extra}
+        self.symbols[_normalize_identifier(name)] = {"type": type_name, "kind": kind, "extra": extra}
 
     def resolve(self, name):
-        name = name.lower()
-        if name in self.symbols:
-            return self.symbols[name]
+        key = _normalize_identifier(name)
+        if key in self.symbols:
+            return self.symbols[key]
         if self.parent:
             return self.parent.resolve(name)
         return None
@@ -221,7 +251,121 @@ class Analyzer:
                 new_stack = with_stack + [expr_type or 'Unknown']
                 self.analyze_block(node.body, scope, filename, context, new_stack)
 
+            elif isinstance(node, ForNode):
+                # `For Each var In coll` and `For var = a To b [Step c]` —
+                # analyze header tokens (including loop var, range, collection)
+                # and recursively walk the body.
+                if node.header_tokens:
+                    self.analyze_statement(node.header_tokens, scope, filename, context, with_stack)
+                self.analyze_block(node.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, DoNode):
+                # Do [While|Until cond] / Do … Loop While|Until / While … Wend
+                if node.condition_tokens:
+                    self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
+                self.analyze_block(node.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, SelectNode):
+                # Selector expression
+                if node.expr_tokens:
+                    self.analyze_statement(node.expr_tokens, scope, filename, context, with_stack)
+                # Per-Case body. Case header tokens (Is < 5, 1 To 10, value list, …)
+                # are walked as expressions so type/identifier errors surface.
+                for case in node.cases:
+                    if not case.is_else and case.header_tokens:
+                        self.analyze_statement(case.header_tokens, scope, filename, context, with_stack)
+                    self.analyze_block(case.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, RedimNode):
+                self._analyze_redim(node, scope, filename, context, with_stack)
+
+            elif isinstance(node, EraseNode):
+                self._analyze_erase(node, scope, filename, context, with_stack)
+
             prev_node = node
+
+    def _analyze_redim(self, node, scope, filename, context, with_stack):
+        """Validate ReDim targets:
+        - The target must resolve to an array variable (declared `Dim x()`,
+          `Dim x() As T`, or already-redimmed). Variant is permissive.
+        - Dimension expressions must be analyzable (identifiers/types valid).
+        """
+        for name_token, dim_tokens, _as_type in node.targets:
+            if name_token is None:
+                continue
+            name = name_token.value
+            sym = scope.resolve(name)
+            if sym is None:
+                self.errors.append({
+                    "file": filename,
+                    "line": name_token.line,
+                    "rule_id": "VBA101",
+                    "severity": "error",
+                    "message": f"Undefined identifier '{name}' in ReDim target inside '{context}'.",
+                })
+            else:
+                target_type = (sym.get("type") or "").lower()
+                kind = (sym.get("kind") or "").lower()
+                # Accept arrays (suffix "()"), Variant, or symbols with a kind
+                # that indicates an array-capable container.
+                is_array = target_type.endswith("()") or "array" in target_type
+                is_variant = target_type in ("variant", "")
+                if kind not in ("variable", "expression") and kind != "":
+                    # Not a local/module variable — likely procedure / class / library.
+                    self.errors.append({
+                        "file": filename,
+                        "line": name_token.line,
+                        "rule_id": "VBA102",
+                        "severity": "error",
+                        "message": f"ReDim target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
+                    })
+                elif not (is_array or is_variant):
+                    self.errors.append({
+                        "file": filename,
+                        "line": name_token.line,
+                        "rule_id": "VBA103",
+                        "severity": "error",
+                        "message": f"ReDim target '{name}' must be a dynamic array, got type '{sym.get('type')}' in '{context}'.",
+                    })
+
+            # Walk dim expressions so any nested identifiers get checked too.
+            if dim_tokens:
+                self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+
+    def _analyze_erase(self, node, scope, filename, context, with_stack):
+        """Validate Erase targets must be array variables (or Variant)."""
+        for tok in node.targets:
+            name = tok.value
+            sym = scope.resolve(name)
+            if sym is None:
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA104",
+                    "severity": "error",
+                    "message": f"Undefined identifier '{name}' in Erase target inside '{context}'.",
+                })
+                continue
+            target_type = (sym.get("type") or "").lower()
+            kind = (sym.get("kind") or "").lower()
+            is_array = target_type.endswith("()") or "array" in target_type
+            is_variant = target_type in ("variant", "")
+            if kind not in ("variable", "expression") and kind != "":
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA105",
+                    "severity": "error",
+                    "message": f"Erase target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
+                })
+            elif not (is_array or is_variant):
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA106",
+                    "severity": "error",
+                    "message": f"Erase target '{name}' must be an array, got type '{sym.get('type')}' in '{context}'.",
+                })
 
     def process_dim(self, tokens, scope, filename, context, with_stack):
         # Simplified Dim parser
