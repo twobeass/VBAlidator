@@ -56,6 +56,8 @@ class Analyzer:
         self.errors = []
         self.udts = {} # name_lower -> TypeNode
         self.reference_names = set()
+        self._current_labels = None
+        self._current_proc_name = None
         
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
@@ -128,7 +130,7 @@ class Analyzer:
     def pass2_resolution(self):
         for mod in self.modules:
             mod_scope = SymbolTable(mod.name, parent=self.global_scope, scope_type=mod.module_type)
-            
+
             for var in mod.variables:
                 mod_scope.define(var.name, var.type_name, 'Variable')
             for proc in mod.procedures:
@@ -137,20 +139,407 @@ class Analyzer:
             for type_name, udt in mod.types.items():
                 mod_scope.define(type_name, type_name, 'Type')
                 self.udts[type_name.lower()] = udt
-                
+
             if mod.module_type in ('Form', 'Class'):
                  mod_scope.define('Me', mod.name, 'Variable')
-            
+
+            # Phase 2.3 — Property Get/Let/Set arity & type compatibility
+            self._validate_property_arity(mod)
+
             for proc in mod.procedures:
                 self.analyze_procedure(proc, mod_scope, mod)
 
+    def _validate_property_arity(self, mod):
+        """Group properties by name and verify the Get/Let/Set contract:
+
+        - Property Let / Property Set must have exactly Get-arg-count + 1
+          parameters (the trailing parameter receives the assigned value).
+        - The trailing parameter type of Let/Set should be assignable to
+          the Property Get return type.
+        - Property Set is only valid when the assigned-value parameter is
+          object-typed; Property Let is the value-typed sibling.
+        """
+        from collections import defaultdict
+        groups = defaultdict(dict)
+        for proc in mod.procedures:
+            ptype = (proc.proc_type or "").lower()
+            if not ptype.startswith("property"):
+                continue
+            kind = ptype.split()[-1]  # 'get' | 'let' | 'set'
+            if kind in ('get', 'let', 'set'):
+                groups[proc.name.lower()][kind] = proc
+
+        for prop_name, members in groups.items():
+            get_proc = members.get('get')
+            let_proc = members.get('let')
+            set_proc = members.get('set')
+
+            # Note: VBA *does* permit both Property Let AND Property Set on
+            # the same property name as long as they accept different
+            # value-parameter types (real-world libraries like JSONBag use
+            # this for polymorphic properties), so we explicitly do NOT
+            # flag the Let+Set combination.
+
+            for accessor in (let_proc, set_proc):
+                if accessor is None:
+                    continue
+                if not accessor.args:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA221",
+                        "severity": "error",
+                        "message": (
+                            f"{accessor.proc_type} '{accessor.name}' must have at least one parameter "
+                            f"(the assigned value)."
+                        ),
+                    })
+                    continue
+
+                if get_proc is not None:
+                    expected = len(get_proc.args) + 1
+                    actual = len(accessor.args)
+                    if actual != expected:
+                        self.errors.append({
+                            "file": mod.filename,
+                            "line": 0,
+                            "rule_id": "VBA222",
+                            "severity": "error",
+                            "message": (
+                                f"{accessor.proc_type} '{accessor.name}' must have {expected} parameter(s) "
+                                f"(Property Get '{get_proc.name}' has {len(get_proc.args)}); got {actual}."
+                            ),
+                        })
+                        continue
+
+                # Set/Let semantic mismatch — independent of Get presence.
+                last_arg = accessor.args[-1]
+                kind = accessor.proc_type.split()[-1].lower()
+                rhs_is_object = self._is_clearly_object(last_arg.type_name)
+                rhs_is_scalar = self._is_clearly_scalar(last_arg.type_name)
+                if kind == 'set' and rhs_is_scalar:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA223",
+                        "severity": "error",
+                        "message": (
+                            f"Property Set '{accessor.name}' last parameter '{last_arg.name}' "
+                            f"is scalar type '{last_arg.type_name}'; use Property Let instead."
+                        ),
+                    })
+                elif kind == 'let' and rhs_is_object:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA224",
+                        "severity": "error",
+                        "message": (
+                            f"Property Let '{accessor.name}' last parameter '{last_arg.name}' "
+                            f"is object type '{last_arg.type_name}'; use Property Set instead."
+                        ),
+                    })
+
     def analyze_procedure(self, proc, mod_scope, mod):
         proc_scope = SymbolTable(proc.name, parent=mod_scope, scope_type='Procedure')
-        
+
         for arg in proc.args:
             proc_scope.define(arg.name, arg.type_name, 'Variable')
-            
-        self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
+
+        # Pass 1.5 — collect all labels reachable inside this procedure so
+        # GoTo / On Error GoTo / Resume / GoSub can be validated against
+        # them in pass 2.
+        labels = set()
+        self._collect_labels(proc.body, labels)
+        self._current_labels = labels
+        self._current_proc_name = proc.name
+
+        try:
+            self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
+        finally:
+            self._current_labels = None
+            self._current_proc_name = None
+
+    def _validate_jump_target(self, tokens, filename, context):
+        """Validate `GoTo`, `On Error GoTo`, `Resume`, `GoSub` against the
+        per-procedure label registry built in `analyze_procedure`.
+
+        Special forms accepted without a label:
+        - `On Error GoTo 0`     → resets the error handler
+        - `On Error GoTo -1`    → clears active error (Office VBA)
+        - `On Error Resume Next`
+        - `Resume` / `Resume Next` (no label)
+        """
+        if not tokens or self._current_labels is None:
+            return
+
+        i = 0
+        n = len(tokens)
+        first = tokens[0].value.lower() if tokens[0].type == 'IDENTIFIER' else None
+
+        # `On Error GoTo <target>` / `On Error Resume Next`
+        if first == 'on' and n >= 2 and tokens[1].type == 'IDENTIFIER' and tokens[1].value.lower() == 'error':
+            i = 2
+            if i >= n:
+                return
+            kw = tokens[i].value.lower() if tokens[i].type == 'IDENTIFIER' else ''
+            if kw == 'resume':
+                # `On Error Resume Next` — no target to validate
+                return
+            if kw == 'goto':
+                i += 1
+                if i >= n:
+                    return
+                target_tok = tokens[i]
+                # `On Error GoTo 0` / `On Error GoTo -1` — reset/clear handler
+                if target_tok.type in ('INTEGER',):
+                    return
+                if target_tok.type == 'OPERATOR' and target_tok.value == '-':
+                    # negative integer e.g. -1
+                    return
+                if target_tok.type == 'IDENTIFIER':
+                    self._check_label_exists(target_tok, filename, context, "On Error GoTo")
+                    return
+            return
+
+        if first == 'goto':
+            if n >= 2 and tokens[1].type == 'IDENTIFIER':
+                self._check_label_exists(tokens[1], filename, context, "GoTo")
+            elif n >= 2 and tokens[1].type == 'INTEGER':
+                # Numeric labels like `GoTo 100` — VBA allows them; require numeric label registered
+                # (We don't track numeric labels yet; tolerate to avoid false positives.)
+                return
+            return
+
+        if first == 'resume':
+            if n == 1:
+                return  # bare `Resume`
+            tok = tokens[1]
+            if tok.type == 'IDENTIFIER':
+                if tok.value.lower() == 'next':
+                    return
+                self._check_label_exists(tok, filename, context, "Resume")
+            return
+
+        if first == 'gosub':
+            if n >= 2 and tokens[1].type == 'IDENTIFIER':
+                self._check_label_exists(tokens[1], filename, context, "GoSub")
+            return
+
+    def _check_label_exists(self, token, filename, context, kind):
+        name = token.value.lower()
+        if name not in self._current_labels:
+            self.errors.append({
+                "file": filename,
+                "line": token.line,
+                "rule_id": "VBA201",
+                "severity": "error",
+                "message": (
+                    f"{kind} target '{token.value}' is not a label in '{context}'. "
+                    f"Declared labels: {sorted(self._current_labels) or 'none'}."
+                ),
+            })
+
+    # ---- Phase 2.2: Set vs. Let assignment enforcement -------------------
+
+    _SCALAR_TYPES = {
+        "boolean", "byte", "integer", "long", "longlong", "longptr",
+        "single", "double", "currency", "decimal", "date", "string",
+    }
+    _CALLABLE_KINDS = {"sub", "function", "procedure", "property", "library"}
+
+    def _is_clearly_scalar(self, type_name):
+        if not type_name:
+            return False
+        t = type_name.lower()
+        if t in self._SCALAR_TYPES:
+            return True
+        # User-defined Type (UDT) is value-typed, not Object.
+        if t in self.udts:
+            return True
+        return False
+
+    def _is_clearly_object(self, type_name):
+        if not type_name:
+            return False
+        t = type_name.lower()
+        if t == "object":
+            return True
+        # Known class in the standard / loaded model.
+        if self.config.object_model.get("classes", {}).get(t):
+            return True
+        return False
+
+    def _split_assignment(self, tokens):
+        """If `tokens` is an assignment, return (lhs_tokens, eq_index, rhs_tokens, has_set).
+        Otherwise return None.
+
+        Recognised forms:
+            <lhs> = <rhs>
+            Set <lhs> = <rhs>
+            Let <lhs> = <rhs>
+        """
+        if not tokens:
+            return None
+        # Strip trailing colon used as statement separator
+        toks = [t for t in tokens if not (t.type == 'OPERATOR' and t.value == ':')]
+        if not toks:
+            return None
+
+        has_set = False
+        has_let = False
+        start = 0
+        first = toks[0]
+        if first.type == 'IDENTIFIER' and first.value.lower() == 'set':
+            has_set = True
+            start = 1
+        elif first.type == 'IDENTIFIER' and first.value.lower() == 'let':
+            has_let = True
+            start = 1
+
+        # Find an `=` not preceded by `<`/`>`/`<=`/`>=` and not part of `:=` / `<>`.
+        eq_index = None
+        paren_depth = 0
+        for idx in range(start, len(toks)):
+            t = toks[idx]
+            if t.type == 'OPERATOR' and t.value == '(':
+                paren_depth += 1
+            elif t.type == 'OPERATOR' and t.value == ')':
+                paren_depth -= 1
+            elif paren_depth == 0 and t.type == 'OPERATOR' and t.value == '=':
+                # avoid named-arg form `name:=value` — but `:=` is its own token.
+                eq_index = idx
+                break
+        if eq_index is None:
+            return None
+
+        lhs = toks[start:eq_index]
+        rhs = toks[eq_index + 1:]
+        if not lhs:
+            return None
+        return lhs, eq_index, rhs, has_set, has_let
+
+    def _resolve_lhs_type(self, lhs_tokens, scope):
+        """Best-effort type resolution for the assignment LHS.
+        Returns (type_name, kind) or (None, None).
+        """
+        if not lhs_tokens:
+            return None, None
+        first = lhs_tokens[0]
+        if first.type != 'IDENTIFIER':
+            return None, None
+        sym = scope.resolve(first.value)
+        if not sym:
+            return None, None
+        # Walk dotted member chain `a.b.c` for assignments to UDT/class members.
+        type_name = sym.get("type")
+        kind = sym.get("kind")
+        i = 1
+        while i + 1 < len(lhs_tokens) and lhs_tokens[i].type == 'OPERATOR' and lhs_tokens[i].value == '.':
+            member_tok = lhs_tokens[i + 1]
+            if member_tok.type != 'IDENTIFIER':
+                break
+            # Try class member resolution
+            cls = self.config.object_model.get("classes", {}).get((type_name or "").lower())
+            if cls and "members" in cls:
+                member_def = cls["members"].get(member_tok.value) or cls["members"].get(member_tok.value.lower())
+                if member_def:
+                    type_name = member_def.get("returns", member_def.get("type", "Variant"))
+                    kind = member_def.get("type", "Variable")
+                    i += 2
+                    continue
+            # UDT member
+            udt = self.udts.get((type_name or "").lower())
+            if udt:
+                hit = next((m for m in udt.members if m.name.lower() == member_tok.value.lower()), None)
+                if hit:
+                    type_name = hit.type_name
+                    kind = "Variable"
+                    i += 2
+                    continue
+            break
+        return type_name, kind
+
+    def _validate_set_vs_let(self, tokens, scope, filename, context):
+        if not tokens:
+            return
+        parsed = self._split_assignment(tokens)
+        if not parsed:
+            return
+        lhs, _eq, _rhs, has_set, has_let = parsed  # noqa: F841
+
+        # Only validate the most common AI-mistake form: bare-identifier LHS
+        # (`x = …` / `Set x = …`). Dotted chains and indexed targets need
+        # full member-chain typing which is Phase 2.6 work — skipping them
+        # here keeps false-positive rate low while still catching the
+        # vast majority of generator bugs.
+        if len(lhs) != 1 or lhs[0].type != 'IDENTIFIER':
+            return
+
+        type_name, kind = self._resolve_lhs_type(lhs, scope)
+        if type_name is None or kind is None:
+            return
+
+        kind_l = (kind or "").lower()
+        if kind_l in self._CALLABLE_KINDS:
+            return
+        if kind_l in ("enumitem", "type", "class", "property"):
+            return
+
+        line = lhs[0].line
+        is_scalar = self._is_clearly_scalar(type_name)
+        is_object = self._is_clearly_object(type_name)
+
+        if has_set and is_scalar:
+            self.errors.append({
+                "file": filename,
+                "line": line,
+                "rule_id": "VBA210",
+                "severity": "error",
+                "message": (
+                    f"`Set` used on non-object target '{lhs[0].value}' of type '{type_name}' "
+                    f"in '{context}'. Use `Let` or assignment without `Set`."
+                ),
+            })
+            return
+
+        if not has_set and is_object and not has_let:
+            self.errors.append({
+                "file": filename,
+                "line": line,
+                "rule_id": "VBA211",
+                "severity": "error",
+                "message": (
+                    f"Object assignment to '{lhs[0].value}' (type '{type_name}') "
+                    f"requires `Set` in '{context}'."
+                ),
+            })
+
+    # ----------------------------------------------------------------------
+
+    def _collect_labels(self, nodes, out):
+        """Recursively walk every block under a procedure body and record
+        every line label so jump targets can be verified.
+        """
+        for node in nodes:
+            if isinstance(node, StatementNode):
+                if self.is_label(node.tokens):
+                    out.add(node.tokens[0].value.lower())
+            elif isinstance(node, IfNode):
+                self._collect_labels(node.true_block, out)
+                for _cond, blk in node.else_blocks:
+                    self._collect_labels(blk, out)
+                if node.else_block:
+                    self._collect_labels(node.else_block, out)
+            elif isinstance(node, WithNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, ForNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, DoNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, SelectNode):
+                for case in node.cases:
+                    self._collect_labels(case.body, out)
 
     def analyze_block(self, nodes, scope, filename, context, with_stack):
         unreachable = False
@@ -174,6 +563,14 @@ class Analyzer:
                             "line": node.tokens[0].line,
                             "message": f"Unreachable code detected in '{context}'."
                         })
+
+                # Phase 2.1 — validate jump targets before normal analysis
+                # so we surface bad jumps even if expression analysis later
+                # bails out on the same line.
+                self._validate_jump_target(node.tokens, filename, context)
+
+                # Phase 2.2 — Set vs. Let on assignments
+                self._validate_set_vs_let(node.tokens, scope, filename, context)
 
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):

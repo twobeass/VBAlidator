@@ -26,7 +26,7 @@ BASELINE: dict[str, tuple[int, str]] = {
     "JSONBag": (12, "baseline phase-1; ComctlLib types not in std model"),
     "VBA-MemoryTools-master": (17, "baseline phase-1; LibMemory member resolution"),
     "VbTrickTimer-master": (54, "baseline phase-1; many API declares + WithEvents"),
-    "stdVBA-master": (341, "baseline phase-1; large library, member-chain depth"),
+    "stdVBA-master": (342, "baseline phase-2; +1 VBA201 (one cross-procedure label jump)"),
 }
 
 

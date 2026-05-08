@@ -23,6 +23,9 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "syntax_errors": ("syntax", "unexpected"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
+    "jump_target": ("not a label", "label"),
+    "set_vs_let": ("set", "object assignment"),
+    "property_arity": ("property", "must have"),
 }
 
 
