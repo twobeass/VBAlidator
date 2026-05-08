@@ -45,8 +45,14 @@ VALID_SAMPLES = _collect()
 def test_valid_sample_has_no_errors(sample_path, run_files):
     result = run_files([sample_path])
     expected = _read_expected_errors(sample_path)
+    # Severity 'warning' / 'info' findings (Option Explicit, etc.) don't
+    # count as compile errors for the valid-sample gate.
+    hard_errors = [
+        e for e in result.errors
+        if e.get("severity", "error") == "error"
+    ]
 
-    assert len(result.errors) <= expected, (
+    assert len(hard_errors) <= expected, (
         f"Expected ≤{expected} analyzer errors for valid sample {sample_path.name}, "
-        f"got {len(result.errors)}: {result.messages!r}"
+        f"got {len(hard_errors)}: {[e.get('message','') for e in hard_errors]!r}"
     )

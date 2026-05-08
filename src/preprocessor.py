@@ -26,13 +26,24 @@ class Preprocessor:
         context['False'] = False
         
         try:
-            # We must be careful with identifiers that are NOT in defines.
-            # In VBA #If, undefined constants are usually Empty/0/False.
-            # We can use a defaultdict or custom dict.
+            # VBA conditional-compilation constants are case-insensitive
+            # (`Vba7`, `VBA7`, `vba7` all refer to the same define) and
+            # undefined constants evaluate to False / Empty.
             class SafeDict(dict):
+                def __init__(self, source):
+                    super().__init__()
+                    for k, v in source.items():
+                        super().__setitem__(k.upper(), v)
+
+                def __getitem__(self, key):
+                    return super().__getitem__(key.upper())
+
+                def __contains__(self, key):
+                    return super().__contains__(key.upper())
+
                 def __missing__(self, key):
                     return False # Assume undefined is False
-            
+
             return bool(eval(expr_str, {}, SafeDict(context)))
         except Exception:
             return False

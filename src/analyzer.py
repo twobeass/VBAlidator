@@ -14,9 +14,10 @@ from .parser import (  # noqa: F401
 def _normalize_identifier(name):
     """Strip VBA legacy type-suffix and bracket-quoting from an identifier.
 
-    - `Mid$` → `mid`
-    - `[A1]` → `a1`
-    - `x%`, `y&`, `z!`, `n#`, `c@` → `x`, `y`, `z`, `n`, `c`
+    - `Mid$` → `mid` (String)
+    - `x%`   → `x`   (Integer)
+    - `c@`   → `c`   (Currency)
+    - `[A1]` → `a1`  (foreign-name escape)
     """
     if not name:
         return name
@@ -24,8 +25,9 @@ def _normalize_identifier(name):
     # Bracket-quoted: [foo] → foo
     if len(n) >= 2 and n[0] == '[' and n[-1] == ']':
         n = n[1:-1]
-    # Trailing legacy type-suffix
-    if n and n[-1] in '%&!#@$':
+    # Trailing legacy type-suffix (only the unambiguous ones — &/!/# are
+    # operators / preprocessor / date markers and never lex into IDENTIFIER).
+    if n and n[-1] in '$%@':
         n = n[:-1]
     return n.lower()
 
@@ -149,8 +151,234 @@ class Analyzer:
             # Phase 2.3 — Property Get/Let/Set arity & type compatibility
             self._validate_property_arity(mod)
 
+            # Phase 3.3 — Declare PtrSafe (64-bit) requirement
+            self._validate_ptrsafe_declares(mod)
+
+            # Phase 3.4 — Enum-member uniqueness within an enum
+            self._validate_enum_uniqueness(mod)
+
+            # Phase 3.6 — Option Explicit (style-warning, configurable)
+            self._validate_option_explicit(mod)
+
+            # Phase 3.1 — Implements <Interface> contract check
+            self._validate_implements(mod, mod_scope)
+
             for proc in mod.procedures:
                 self.analyze_procedure(proc, mod_scope, mod)
+
+    def _validate_option_explicit(self, mod):
+        """Modules without `Option Explicit` allow implicit (auto-Variant)
+        variable creation, which is the #1 source of typo-induced bugs in
+        VBA. Style-level severity: doesn't fail compilation but is a strong
+        code-quality signal for AI-generated code reviews.
+        """
+        # Forms have an implicit Option Explicit-like behaviour for their
+        # Begin/End block, but their `_Initialize` etc. modules still
+        # benefit from the explicit declaration.
+        opts = getattr(mod, 'options', {}) or {}
+        if not opts.get('explicit', False):
+            self.errors.append({
+                "file": mod.filename,
+                "line": 1,
+                "rule_id": "VBA320",
+                "severity": "warning",
+                "message": (
+                    f"Module '{mod.name}' is missing `Option Explicit`. "
+                    f"Without it, typo'd variable names silently create new "
+                    f"Variant variables — a common source of AI-generated bugs."
+                ),
+            })
+
+    def _validate_implements(self, mod, mod_scope):
+        """For each `Implements X` statement, verify the class provides a
+        matching method `X_<Member>` for every public member of the
+        interface. The interface itself is resolved either as a same-project
+        class module (best effort) or as a library type.
+        """
+        impls = getattr(mod, 'implements', []) or []
+        if not impls:
+            return
+        for raw in impls:
+            iface_name = raw.split('.')[-1]
+            iface = self._find_interface_module(iface_name)
+            if iface is None:
+                # Unknown interface — let the regular identifier resolver
+                # (or a future library-type pass) handle it.
+                continue
+            for proc in iface.procedures:
+                if proc.proc_type and proc.proc_type.lower().startswith(('sub', 'function', 'property')):
+                    if proc.scope.lower() not in ('public', 'friend'):
+                        continue
+                    expected_name = f"{iface_name}_{proc.name}"
+                    found = any(p.name.lower() == expected_name.lower() for p in mod.procedures)
+                    if not found:
+                        self.errors.append({
+                            "file": mod.filename,
+                            "line": 0,
+                            "rule_id": "VBA330",
+                            "severity": "error",
+                            "message": (
+                                f"Class '{mod.name}' implements '{iface_name}' but is "
+                                f"missing the required method '{expected_name}' "
+                                f"(matching {proc.proc_type} {proc.name})."
+                            ),
+                        })
+
+    def _find_interface_module(self, iface_name):
+        target = iface_name.lower()
+        for mod in self.modules:
+            if mod.module_type in ('Class', 'Form') and mod.name.lower() == target:
+                return mod
+        return None
+
+    # ---- Phase 3.2: RaiseEvent target + argument count ------------------
+
+    def _validate_raise_event(self, tokens, scope, filename, context):
+        """`RaiseEvent <Name>(<args>?)` — only legal when <Name> is an
+        Event declared in the same Class/Form module. Validate name and
+        argument count.
+        """
+        if not tokens or len(tokens) < 2:
+            return
+        if tokens[0].type != 'IDENTIFIER' or tokens[0].value.lower() != 'raiseevent':
+            return
+        name_tok = tokens[1]
+        if name_tok.type != 'IDENTIFIER':
+            return
+
+        # Look up the event by name in the module that owns the current
+        # procedure (events are private to their declaring class).
+        event = None
+        for mod in self.modules:
+            if mod.filename != filename:
+                continue
+            for proc in mod.procedures:
+                if (proc.proc_type or '').lower() == 'event' and proc.name.lower() == name_tok.value.lower():
+                    event = proc
+                    break
+            break
+        if event is None:
+            self.errors.append({
+                "file": filename,
+                "line": name_tok.line,
+                "rule_id": "VBA340",
+                "severity": "error",
+                "message": (
+                    f"RaiseEvent '{name_tok.value}' in '{context}': no matching "
+                    f"`Event {name_tok.value}` declared in this module."
+                ),
+            })
+            return
+
+        # Count arguments — between the parens following the event name.
+        # Token shape: [RaiseEvent, Name, '(', arg, ',', arg, ..., ')'].
+        if len(tokens) < 3 or not (tokens[2].type == 'OPERATOR' and tokens[2].value == '('):
+            actual = 0
+        else:
+            actual = self._count_call_args(tokens, 2)
+
+        expected_min = sum(1 for a in event.args if not a.is_optional and not a.is_paramarray)
+        expected_max = len(event.args)
+        # ParamArray accepts unlimited.
+        if any(a.is_paramarray for a in event.args):
+            expected_max = 9999
+
+        if actual < expected_min or actual > expected_max:
+            self.errors.append({
+                "file": filename,
+                "line": name_tok.line,
+                "rule_id": "VBA341",
+                "severity": "error",
+                "message": (
+                    f"RaiseEvent '{name_tok.value}' arg count mismatch: "
+                    f"event declared with {expected_min}{('..' + str(expected_max)) if expected_max != expected_min else ''} "
+                    f"parameter(s), got {actual}."
+                ),
+            })
+
+    def _count_call_args(self, tokens, lparen_idx):
+        """Given a token list and the index of the opening `(`, return the
+        number of comma-separated top-level arguments inside the parens.
+        Empty parens → 0.
+        """
+        depth = 0
+        count = 0
+        seen_any = False
+        for j in range(lparen_idx, len(tokens)):
+            t = tokens[j]
+            if t.type == 'OPERATOR' and t.value == '(':
+                depth += 1
+            elif t.type == 'OPERATOR' and t.value == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            elif depth == 1 and t.type == 'OPERATOR' and t.value == ',':
+                count += 1
+                seen_any = True
+            elif depth == 1:
+                seen_any = True
+        if seen_any:
+            return count + 1
+        return 0
+
+    def _validate_ptrsafe_declares(self, mod):
+        """In 64-bit Office (the modern default since Office 2010 for x64
+        and the current Microsoft 365 default) every `Declare` statement
+        must carry the `PtrSafe` attribute. The check is gated by the
+        `WIN64` / `VBA7` conditional-compilation defines so a 32-bit-only
+        run can opt out by passing `--define WIN64=False`.
+        """
+        defs = self.config.definitions
+        # If the user has explicitly set 32-bit, skip the check.
+        if defs.get('WIN64') is False or defs.get('VBA7') is False:
+            return
+        for proc in mod.procedures:
+            if not proc.is_declare:
+                continue
+            if proc.is_ptrsafe:
+                continue
+            self.errors.append({
+                "file": mod.filename,
+                "line": getattr(proc, 'declare_line', 0) or 0,
+                "rule_id": "VBA300",
+                "severity": "error",
+                "message": (
+                    f"Declare {proc.proc_type} '{proc.name}' is missing the "
+                    f"`PtrSafe` attribute. 64-bit VBA (Office 2010 x64+, "
+                    f"Microsoft 365) refuses to compile API declarations "
+                    f"without it. Add `PtrSafe` after `Declare`."
+                ),
+            })
+
+    def _validate_enum_uniqueness(self, mod):
+        """Within a single Enum block all member names must be unique.
+        VBA accepts duplicate *values* (`A = 1: B = 1`) but not duplicate
+        *names*. The error here mirrors the IDE's compile-time message.
+        """
+        for type_name, type_node in mod.types.items():
+            members = getattr(type_node, 'members', [])
+            # Heuristic: enums are registered alongside UDTs in mod.types,
+            # but enum members carry a literal Long type while UDT members
+            # have arbitrary types — and Enum members are exposed
+            # globally via pass1_discovery. We cover both: if a member
+            # name repeats inside `members`, flag it.
+            seen = {}
+            for m in members:
+                key = m.name.lower()
+                first_seen = seen.get(key)
+                if first_seen is not None:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA310",
+                        "severity": "error",
+                        "message": (
+                            f"Enum / Type '{type_name}' has duplicate member name "
+                            f"'{m.name}'."
+                        ),
+                    })
+                else:
+                    seen[key] = m
 
     def _validate_property_arity(self, mod):
         """Group properties by name and verify the Get/Let/Set contract:
@@ -580,9 +808,17 @@ class Analyzer:
                 # Phase 2.4 — Operator-type sanity (literal-only)
                 self._validate_operator_types(node.tokens, filename, context)
 
+                # Phase 3.2 — RaiseEvent target + arity
+                self._validate_raise_event(node.tokens, scope, filename, context)
+
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
                      self.process_dim(node.tokens, scope, filename, context, with_stack)
+                elif node.tokens and node.tokens[0].value.lower() == 'raiseevent':
+                     # Suppress regular identifier resolution on the event name
+                     # — events are only visible to their declaring class and
+                     # _validate_raise_event has already vetted them.
+                     pass
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
 

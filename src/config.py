@@ -3,7 +3,16 @@ import os
 
 class Config:
     def __init__(self):
-        self.definitions = {}  # For Conditional Compilation (e.g., Win64)
+        # Default conditional-compilation constants reflect a modern
+        # 64-bit Microsoft 365 host. The user can override either with
+        # `--define WIN64=False` or by adjusting the dict directly.
+        self.definitions = {
+            'VBA7': True,
+            'WIN64': True,
+            'WIN32': False,
+            'WIN16': False,
+            'MAC': False,
+        }
         self.object_model = {
             "globals": {},
             "classes": {},

@@ -30,6 +30,10 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "const_expression": ("const",),
     "operator_type": ("type mismatch", "arithmetic"),
     "fixed_length_string": ("fixed-length",),
+    "declare_ptrsafe": ("ptrsafe", "declare"),
+    "enum_uniqueness": ("enum",),
+    "raise_event": ("raiseevent", "event"),
+    "implements_iface": ("implements", "missing"),
 }
 
 

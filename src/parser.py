@@ -31,12 +31,13 @@ class WithNode(Node):
         return f"With(expr, {len(self.body)} stmts)"
 
 class ProcedureNode(Node):
-    def __init__(self, name, proc_type, return_type='Variant', scope='Public', is_declare=False, lib_name=None, alias_name=None):
+    def __init__(self, name, proc_type, return_type='Variant', scope='Public', is_declare=False, lib_name=None, alias_name=None, is_ptrsafe=False):
         self.name = name
         self.proc_type = proc_type # Sub, Function, Property Get/Set/Let
         self.return_type = return_type
         self.scope = scope
         self.is_declare = is_declare
+        self.is_ptrsafe = is_ptrsafe
         self.lib_name = lib_name
         self.alias_name = alias_name
         self.args = [] # List of VariableNode
@@ -45,7 +46,8 @@ class ProcedureNode(Node):
 
     def __repr__(self):
         decl = "Declare " if self.is_declare else ""
-        return f"{decl}{self.proc_type} {self.name}() As {self.return_type}"
+        ptr = "PtrSafe " if self.is_ptrsafe else ""
+        return f"{decl}{ptr}{self.proc_type} {self.name}() As {self.return_type}"
 
 class TypeNode(Node):
     def __init__(self, name, scope='Public'):
@@ -68,6 +70,15 @@ class ModuleNode(Node):
         # Phase 2.9 — DefInt/DefBool/DefStr… implicit typing per letter.
         # Lowercased single-letter ('a'..'z') → type name (Integer, Long, …).
         self.def_type_map = {}
+        # Phase 3.6 — Option statements observed at module level.
+        self.options = {
+            "explicit": False,        # Option Explicit
+            "compare": None,           # 'binary' | 'text' | 'database'
+            "base": 0,                 # Option Base 0 | 1
+            "private_module": False,   # Option Private Module
+        }
+        # Phase 3.1 — list of interface names this class/form implements.
+        self.implements = []
 
 class IfNode(Node):
     def __init__(self, condition_tokens, true_block, else_blocks=None, else_block=None):
@@ -198,11 +209,9 @@ class VBAParser:
             if self.match('IDENTIFIER', 'Attribute'):
                 self.parse_attribute(module)
             elif self.match('IDENTIFIER', 'Option'):
-                self.consume()
-                self.consume_statement()
+                self._parse_option(module)
             elif self.match('IDENTIFIER', 'Implements'):
-                self.consume()
-                self.consume_statement()
+                self._parse_implements(module)
             elif self.current_token.type == 'IDENTIFIER' and self.current_token.value.lower() in (
                 'defbool', 'defbyte', 'defint', 'deflng', 'deflnglng', 'deflngptr',
                 'defcur', 'defsng', 'defdbl', 'defdate', 'defstr', 'defobj', 'defvar',
@@ -273,6 +282,50 @@ class VBAParser:
                 self.advance()
         self.consume_statement()
 
+    def _parse_option(self, module):
+        """Parse `Option Explicit | Compare {Binary|Text|Database} | Base N | Private Module`."""
+        self.advance()  # consume 'Option'
+        if self.current_token.type != 'IDENTIFIER':
+            self.consume_statement()
+            return
+        kind = self.current_token.value.lower()
+        self.advance()
+        if kind == 'explicit':
+            module.options['explicit'] = True
+        elif kind == 'compare':
+            if self.current_token.type == 'IDENTIFIER':
+                module.options['compare'] = self.current_token.value.lower()
+                self.advance()
+        elif kind == 'base':
+            if self.current_token.type == 'INTEGER':
+                try:
+                    module.options['base'] = int(self.current_token.value)
+                except ValueError:
+                    pass
+                self.advance()
+        elif kind == 'private':
+            # `Option Private Module`
+            if self.match('IDENTIFIER', 'Module'):
+                self.advance()
+                module.options['private_module'] = True
+        self.consume_statement()
+
+    def _parse_implements(self, module):
+        """Parse `Implements <Interface[.SubInterface]>`."""
+        self.advance()  # consume 'Implements'
+        parts = []
+        while self.current_token.type == 'IDENTIFIER':
+            parts.append(self.current_token.value)
+            self.advance()
+            if self.match('OPERATOR', '.'):
+                parts.append('.')
+                self.advance()
+            else:
+                break
+        if parts:
+            module.implements.append("".join(parts))
+        self.consume_statement()
+
     def consume_statement(self):
         while self.current_token.type not in ('NEWLINE', 'EOF'):
             if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
@@ -331,26 +384,27 @@ class VBAParser:
         # Handle Declare
         # [Public|Private] Declare [PtrSafe] Sub/Function ...
         if self.match('IDENTIFIER', 'Declare'):
+            declare_line = self.current_token.line
             self.advance() # consume Declare
-            
-            # Optional PtrSafe (will be validated against 64-bit mode in P3.3)
-            is_ptrsafe = False  # noqa: F841
+
+            # Optional PtrSafe — required on 64-bit Office hosts.
+            is_ptrsafe = False
             if self.match('IDENTIFIER', 'PtrSafe'):
                 self.advance()
-                is_ptrsafe = True  # noqa: F841
-            
+                is_ptrsafe = True
+
             proc_type = "Sub"
             if self.match('IDENTIFIER', 'Function'):
                 proc_type = "Function"
                 self.advance()
             elif self.match('IDENTIFIER', 'Sub'):
                 self.advance()
-            
+
             proc_name = "Unknown"
             if self.current_token.type == 'IDENTIFIER':
                 proc_name = self.current_token.value
                 self.advance()
-            
+
             # Lib "..."
             lib_name = None
             if self.match('IDENTIFIER', 'Lib'):
@@ -358,7 +412,7 @@ class VBAParser:
                 if self.current_token.type == 'STRING':
                     lib_name = self.current_token.value
                     self.advance()
-            
+
             # Alias "..."
             alias_name = None
             if self.match('IDENTIFIER', 'Alias'):
@@ -366,18 +420,24 @@ class VBAParser:
                 if self.current_token.type == 'STRING':
                     alias_name = self.current_token.value
                     self.advance()
-            
-            proc = ProcedureNode(proc_name, proc_type, scope=scope, is_declare=True, lib_name=lib_name, alias_name=alias_name)
-            
+
+            proc = ProcedureNode(
+                proc_name, proc_type,
+                scope=scope, is_declare=True,
+                lib_name=lib_name, alias_name=alias_name,
+                is_ptrsafe=is_ptrsafe,
+            )
+            proc.declare_line = declare_line  # used for diagnostics
+
             # Args (...)
             if self.match('OPERATOR', '('):
                 self.parse_arg_list(proc)
-            
+
             # Return type
             if self.match('IDENTIFIER', 'As'):
                 self.advance()
                 proc.return_type = self.parse_type_signature()
-                
+
             self.consume_statement()
             module.procedures.append(proc)
             return

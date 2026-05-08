@@ -204,6 +204,7 @@ End Sub
 def test_string_suffix_resolves(run_source):
     code = """
 Attribute VB_Name = "M"
+Option Explicit
 Sub S()
     Dim s As String
     s = Left$("hello", 3)
@@ -212,8 +213,9 @@ Sub S()
 End Sub
 """
     result = run_source(code)
-    assert result.errors == [], (
-        f"$-suffixed standard functions must resolve. Errors: {result.messages!r}"
+    hard = [e for e in result.errors if e.get("severity", "error") == "error"]
+    assert hard == [], (
+        f"$-suffixed standard functions must resolve. Errors: {[e['message'] for e in hard]!r}"
     )
 
 

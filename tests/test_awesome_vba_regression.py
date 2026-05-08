@@ -23,10 +23,10 @@ AWESOME_DIR = Path(__file__).resolve().parent / "awesome_vba"
 # Initial baseline measured in PR #1 (Phase 0), each value is the current
 # ceiling — never a target. Lower me as the analyzer improves.
 BASELINE: dict[str, tuple[int, str]] = {
-    "JSONBag": (12, "baseline phase-1; ComctlLib types not in std model"),
-    "VBA-MemoryTools-master": (18, "baseline phase-2; +1 VBA231 Const-from-variable in LibMemory"),
-    "VbTrickTimer-master": (54, "baseline phase-1; many API declares + WithEvents"),
-    "stdVBA-master": (342, "baseline phase-2; +1 VBA201 (one cross-procedure label jump)"),
+    "JSONBag": (12, "baseline phase-3; ComctlLib types not in std model"),
+    "VBA-MemoryTools-master": (18, "baseline phase-3; +1 VBA231 Const-from-variable in LibMemory"),
+    "VbTrickTimer-master": (5, "baseline phase-3; preprocessor case-fix + numeric type suffix"),
+    "stdVBA-master": (335, "baseline phase-3; preprocessor case-fix recovered ~7 declares"),
 }
 
 
@@ -53,9 +53,16 @@ def test_awesome_vba_within_baseline(project, run_files):
         pytest.skip(f"No VBA files in {project}")
 
     result = run_files(files)
+    # Style-level findings (warning / info) are not part of the baseline.
+    # Only hard compile errors gate regression of the analyzer surface.
+    hard_errors = [
+        e for e in result.errors
+        if e.get("severity", "error") == "error"
+    ]
     ceiling, reason = BASELINE.get(project.name, (0, "no baseline; expected clean"))
 
-    assert len(result.errors) <= ceiling, (
-        f"Regression in {project.name}: {len(result.errors)} errors exceeds "
-        f"baseline {ceiling} ({reason}). Sample messages: {result.messages[:5]!r}"
+    assert len(hard_errors) <= ceiling, (
+        f"Regression in {project.name}: {len(hard_errors)} errors exceeds "
+        f"baseline {ceiling} ({reason}). Sample messages: "
+        f"{[e.get('message','') for e in hard_errors[:5]]!r}"
     )

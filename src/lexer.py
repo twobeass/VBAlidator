@@ -193,16 +193,25 @@ class Lexer:
             # `#January` from `#January 1, 2020#` and leave a stray `#`.
             ('DATELITERAL', r'\#[^#\r\n]+\#'),
             ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
-            ('HEX', r'&H[0-9A-Fa-f]+'),
-            ('OCTAL', r'&O[0-7]+'),
-            ('FLOAT', r'(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+'),
-            ('INTEGER', r'\d+'),
+            # Numeric literals may carry a trailing legacy type-suffix:
+            # & Long, % Integer, # Double, ! Single, @ Currency, $ String
+            # (rarely on numeric, but harmless to allow).
+            ('HEX', r'&H[0-9A-Fa-f]+[&%@!#]?'),
+            ('OCTAL', r'&O[0-7]+[&%@!#]?'),
+            ('FLOAT', r'(?:(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+)[#!@]?'),
+            ('INTEGER', r'\d+[&%@!#]?'),
             ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
             ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\!]'), # Added : \ ! to operator
             ('BRACKET_IDENTIFIER', r'\[[^\]\r\n]*\]'),
-            ('IDENTIFIER', r'[a-zA-Z_]\w*\$?'),
+            # Identifier may carry a legacy single-character type suffix:
+            # $ → String, % → Integer, @ → Currency.
+            # &, !, # are already used as operators / preprocessor / date
+            # markers and stay tokenised separately to keep disambiguation
+            # simple — the analyzer's _normalize_identifier is permissive
+            # about the suffixes it strips.
+            ('IDENTIFIER', r'[a-zA-Z_]\w*[$%@]?'),
             ('MISMATCH', r'.'),
         ]
 

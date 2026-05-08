@@ -11,23 +11,25 @@ from src.lexer import Lexer, LexerError
 
 
 def test_lexer_records_unexpected_character():
-    code = "Dim x As Long\nx = 1@\n"
+    # Use € (Euro) — never a valid VBA token. Keep `@` out of the test
+    # because numeric type-suffix `1@` (Currency) is legal as of Phase 3.
+    code = "Dim x As Long\nx = 1€\n"
     lex = Lexer(code)
     list(lex.tokenize())
-    assert lex.errors, "Lexer should record unexpected character '@'"
+    assert lex.errors, "Lexer should record unexpected character '€'"
     assert all(isinstance(e, LexerError) for e in lex.errors)
-    assert any(e.char == "@" for e in lex.errors)
+    assert any(e.char == "€" for e in lex.errors)
 
 
 def test_lexer_error_to_dict_shape():
-    err = LexerError("@", line=2, column=7)
+    err = LexerError("€", line=2, column=7)
     payload = err.to_dict(filename="Module1.bas")
     assert payload["file"] == "Module1.bas"
     assert payload["line"] == 2
     assert payload["column"] == 7
     assert payload["rule_id"] == "VBA_LEX001"
     assert payload["severity"] == "error"
-    assert "@" in payload["message"]
+    assert "€" in payload["message"]
 
 
 def test_lexer_errors_surface_through_pipeline(run_source):
@@ -35,7 +37,7 @@ def test_lexer_errors_surface_through_pipeline(run_source):
 Attribute VB_Name = "M"
 Sub S()
     Dim x As Long
-    x = 1@
+    x = 1€
 End Sub
 """
     result = run_source(code)
