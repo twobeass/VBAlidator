@@ -53,6 +53,7 @@ nav:
   - Rule catalogue:
       - Overview: rules/index.md
   - CI/CD: ci-cd.md
+  - UAT walkthrough: uat.md
   - Roadmap: roadmap.md
   - Changelog: changelog.md
 

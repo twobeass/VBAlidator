@@ -131,6 +131,10 @@ In-repo:
 - [Rule catalogue](docs/rules/index.md) — all 35 rules with examples
 - [CI / CD](docs/ci-cd.md) — workflows, release lifecycle, branch
   protection
+- [UAT walkthrough](docs/uat.md) — section-by-section human validation
+  script for the current branch
+- [TODO](TODO.md) — open items that need a Windows machine, live
+  PyPI/GHCR/Pages access, or future code work
 - [Roadmap](docs/roadmap.md) — what's done, what's queued
 
 ## Development
