@@ -26,6 +26,10 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "jump_target": ("not a label", "label"),
     "set_vs_let": ("set", "object assignment"),
     "property_arity": ("property", "must have"),
+    "date_literal": ("invalid date",),
+    "const_expression": ("const",),
+    "operator_type": ("type mismatch", "arithmetic"),
+    "fixed_length_string": ("fixed-length",),
 }
 
 

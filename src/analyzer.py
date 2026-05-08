@@ -58,6 +58,7 @@ class Analyzer:
         self.reference_names = set()
         self._current_labels = None
         self._current_proc_name = None
+        self._current_def_type_map = {}
         
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
@@ -108,7 +109,8 @@ class Analyzer:
             if mod.module_type == 'Module':
                 for var in mod.variables:
                     if var.scope.lower() in ('public', 'global', 'friend'):
-                        self.global_scope.define(var.name, var.type_name, 'Variable')
+                        kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                        self.global_scope.define(var.name, var.type_name, kind)
                 
                 for proc in mod.procedures:
                     if proc.scope.lower() in ('public', 'friend'):
@@ -132,7 +134,8 @@ class Analyzer:
             mod_scope = SymbolTable(mod.name, parent=self.global_scope, scope_type=mod.module_type)
 
             for var in mod.variables:
-                mod_scope.define(var.name, var.type_name, 'Variable')
+                kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                mod_scope.define(var.name, var.type_name, kind)
             for proc in mod.procedures:
                 mod_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
             # Register Local/Private Types in Module Scope
@@ -253,12 +256,14 @@ class Analyzer:
         self._collect_labels(proc.body, labels)
         self._current_labels = labels
         self._current_proc_name = proc.name
+        self._current_def_type_map = getattr(mod, "def_type_map", {}) or {}
 
         try:
             self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
         finally:
             self._current_labels = None
             self._current_proc_name = None
+            self._current_def_type_map = {}
 
     def _validate_jump_target(self, tokens, filename, context):
         """Validate `GoTo`, `On Error GoTo`, `Resume`, `GoSub` against the
@@ -572,6 +577,9 @@ class Analyzer:
                 # Phase 2.2 — Set vs. Let on assignments
                 self._validate_set_vs_let(node.tokens, scope, filename, context)
 
+                # Phase 2.4 — Operator-type sanity (literal-only)
+                self._validate_operator_types(node.tokens, filename, context)
+
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
                      self.process_dim(node.tokens, scope, filename, context, with_stack)
@@ -764,11 +772,173 @@ class Analyzer:
                     "message": f"Erase target '{name}' must be an array, got type '{sym.get('type')}' in '{context}'.",
                 })
 
+    # ---- Phase 2.4: Operator-type compatibility (literal-only) ----------
+
+    # Strictly-arithmetic operators where a string operand is a guaranteed
+    # type error. `+` is *not* in this list because VBA coerces it
+    # bidirectionally between String and Number; `&` is string concat.
+    _ARITH_OPS = {'-', '*', '/', '\\', '^'}
+    _ARITH_KEYWORDS = {'mod'}
+
+    def _validate_operator_types(self, tokens, filename, context):
+        """Walk a statement's tokens and flag arithmetic operators that
+        sit directly between a string literal and a numeric / string
+        literal. The check is intentionally conservative — only literal
+        operands are inspected, so it never fires on variables whose
+        runtime type might be coerce-able.
+        """
+        if not tokens:
+            return
+        for i, tok in enumerate(tokens):
+            if tok.type == 'OPERATOR' and tok.value in self._ARITH_OPS:
+                self._check_arith_at(tokens, i, tok.value, filename, context)
+            elif tok.type == 'IDENTIFIER' and tok.value.lower() in self._ARITH_KEYWORDS:
+                self._check_arith_at(tokens, i, tok.value, filename, context)
+
+    def _check_arith_at(self, tokens, idx, op_text, filename, context):
+        # Find previous non-whitespace token (lhs) and next (rhs).
+        lhs = tokens[idx - 1] if idx > 0 else None
+        rhs = tokens[idx + 1] if idx + 1 < len(tokens) else None
+        if not lhs or not rhs:
+            return
+        # Skip unary `-`: previous token is itself an operator/keyword.
+        if op_text == '-':
+            if lhs.type == 'OPERATOR' and lhs.value in {'(', ',', '=', '<', '>', '+', '-', '*', '/', '\\', '^', '<>', '<=', '>='}:
+                return
+            if lhs.type == 'IDENTIFIER' and lhs.value.lower() in {
+                'and', 'or', 'not', 'xor', 'eqv', 'imp', 'mod', 'like',
+                'is', 'then', 'to', 'step', 'in', 'else',
+            }:
+                return
+
+        lhs_str = lhs.type == 'STRING'
+        rhs_str = rhs.type == 'STRING'
+        lhs_num = lhs.type in ('INTEGER', 'FLOAT', 'HEX', 'OCTAL')
+        rhs_num = rhs.type in ('INTEGER', 'FLOAT', 'HEX', 'OCTAL')
+
+        # Only fire when at least one side is a literal AND types disagree
+        # in a way arithmetic cannot reconcile.
+        if (lhs_str and rhs_num) or (lhs_num and rhs_str) or (lhs_str and rhs_str):
+            offender = lhs if lhs_str else rhs
+            self.errors.append({
+                "file": filename,
+                "line": offender.line,
+                "rule_id": "VBA240",
+                "severity": "error",
+                "message": (
+                    f"Type mismatch: arithmetic operator '{op_text}' between "
+                    f"string literal and numeric literal in '{context}'. "
+                    f"Use `&` for concatenation or `+` if you really mean "
+                    f"VBA's bidirectional coercion."
+                ),
+            })
+
+    # ----------------------------------------------------------------------
+
+    # ---- Phase 2.5: Const-expression validation -------------------------
+
+    # Built-in constant aliases shipped in the std model that *are* constants
+    # even though their entry kind happens to be "String"/"Long"/etc.
+    _CONST_KEYWORDS = {
+        'true', 'false', 'nothing', 'empty', 'null',
+    }
+    _CONST_OPERATORS = {
+        '+', '-', '*', '/', '\\', '^', '&', '=', '<>', '<', '>', '<=', '>=',
+        '(', ')', '.', ',', ':',
+    }
+    _CONST_KEYWORD_OPS = {
+        'and', 'or', 'not', 'xor', 'eqv', 'imp', 'mod', 'like',
+        'is', 'true', 'false', 'nothing', 'empty', 'null',
+    }
+
+    def _is_constant_kind(self, sym):
+        """A symbol counts as constant for the purposes of a Const RHS if
+        it is itself another Const, an Enum member, or a literal-typed
+        well-known global (vbCrLf, vbObjectError, …)."""
+        if not sym:
+            return False
+        kind = (sym.get('kind') or '').lower()
+        if kind in ('const', 'enumitem'):
+            return True
+        # Built-in scalar globals (vbCrLf, vbCritical, …) declared in
+        # std_model with a scalar type and no callable kind. They behave
+        # like constants in the VBA compiler.
+        if kind in ('string', 'long', 'integer', 'boolean', 'double', 'variant'):
+            return True
+        return False
+
+    def _validate_const_expression(self, expr_tokens, scope, filename, context, const_name):
+        """Reject Const initialisers that reference variables or call functions."""
+        if not expr_tokens:
+            return
+        i = 0
+        n = len(expr_tokens)
+        while i < n:
+            tok = expr_tokens[i]
+            if tok.type == 'IDENTIFIER':
+                low = tok.value.lower().rstrip('$')
+                # Reserved keywords that are valid in const expressions
+                if low in self._CONST_KEYWORDS or low in self._CONST_KEYWORD_OPS:
+                    i += 1
+                    continue
+
+                # Treat `<ident> ( ... )` as a function call → not constant.
+                next_is_call = (
+                    i + 1 < n
+                    and expr_tokens[i + 1].type == 'OPERATOR'
+                    and expr_tokens[i + 1].value == '('
+                )
+                sym = scope.resolve(tok.value)
+                if next_is_call:
+                    self.errors.append({
+                        "file": filename,
+                        "line": tok.line,
+                        "rule_id": "VBA230",
+                        "severity": "error",
+                        "message": (
+                            f"Const '{const_name}' initialiser calls '{tok.value}' — "
+                            f"only constant expressions are allowed."
+                        ),
+                    })
+                    return
+                if sym and not self._is_constant_kind(sym):
+                    self.errors.append({
+                        "file": filename,
+                        "line": tok.line,
+                        "rule_id": "VBA231",
+                        "severity": "error",
+                        "message": (
+                            f"Const '{const_name}' initialiser references non-constant "
+                            f"'{tok.value}' (kind={sym.get('kind')})."
+                        ),
+                    })
+                    return
+                # Unknown identifier — already reported elsewhere; no extra noise.
+            i += 1
+
+    # ----------------------------------------------------------------------
+
+    def _apply_def_type(self, name, current_type):
+        """Resolve implicit DefInt/DefStr/… typing for an untyped variable
+        whose first letter falls in the active per-module DefType map.
+        """
+        if current_type and current_type.lower() != 'variant':
+            return current_type
+        if not name or not self._current_def_type_map:
+            return current_type
+        first = name[0].lower()
+        return self._current_def_type_map.get(first, current_type)
+
     def process_dim(self, tokens, scope, filename, context, with_stack):
         # Simplified Dim parser
+        is_const = bool(tokens) and tokens[0].value.lower() == 'const'
+        symbol_kind = 'Const' if is_const else 'Variable'
+        # Track whether the current name has been given an explicit `As` —
+        # used so DefType only applies when typing was implicit.
+        explicit_as = False
         iterator = iter(tokens)
         next(iterator) # Skip Dim
-        
+
         current_name = None
         current_type = 'Variant'
         is_array = False
@@ -779,6 +949,7 @@ class Analyzer:
             t = tokens_list[i]
             if t.type == 'IDENTIFIER':
                 if t.value.lower() == 'as':
+                    explicit_as = True
                     i += 1
                     type_parts = []
                     while i < len(tokens_list):
@@ -800,7 +971,43 @@ class Analyzer:
                     if is_array:
                         current_type += "()"
 
-                    if current_name:
+                    # Phase 2.8 — Fixed-length String only valid at module
+                    # level (or inside UDTs). `Dim s As String * 10` inside
+                    # a procedure is a hard VBA compile error.
+                    if (
+                        current_type.lower() == "string"
+                        and i < len(tokens_list)
+                        and tokens_list[i].type == 'OPERATOR'
+                        and tokens_list[i].value == '*'
+                    ):
+                        line = tokens_list[i].line
+                        # Consume `* <length>` regardless so we don't leak
+                        # tokens into the next iteration.
+                        i += 1
+                        if i < len(tokens_list):
+                            i += 1
+                        self.errors.append({
+                            "file": filename,
+                            "line": line,
+                            "rule_id": "VBA250",
+                            "severity": "error",
+                            "message": (
+                                f"Fixed-length String declaration `As String * N` "
+                                f"is not allowed at procedure level (only in modules "
+                                f"or UDTs) for '{current_name}' in '{context}'."
+                            ),
+                        })
+
+                    # If `=` follows the As-type, leave the actual define to
+                    # the `=` branch so the assignment expression is analyzed
+                    # (and so Const-expression validation can fire).
+                    next_is_eq = (
+                        i < len(tokens_list)
+                        and tokens_list[i].type == 'OPERATOR'
+                        and tokens_list[i].value == '='
+                    )
+
+                    if current_name and not next_is_eq:
                         if current_name.lower() in scope.symbols:
                             self.errors.append({
                                 "file": filename,
@@ -808,7 +1015,7 @@ class Analyzer:
                                 "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
                             })
                         else:
-                            scope.define(current_name, current_type, 'Variable')
+                            scope.define(current_name, current_type, symbol_kind)
                         current_name = None
                         current_type = 'Variant'
                         is_array = False
@@ -816,11 +1023,14 @@ class Analyzer:
                     if current_name:
                         # Implicit Variant definition for the previous variable
                         t_type = "Variant"
+                        if not explicit_as:
+                            t_type = self._apply_def_type(current_name, t_type)
                         if is_array: t_type += "()"
-                        scope.define(current_name, t_type, 'Variable')
+                        scope.define(current_name, t_type, symbol_kind)
                         is_array = False # Reset for next
 
                     current_name = t.value
+                    explicit_as = False
                     i += 1
                     
                     # Check for Array ()
@@ -844,8 +1054,10 @@ class Analyzer:
                          })
                      else:
                          t_type = current_type
+                         if not explicit_as:
+                             t_type = self._apply_def_type(current_name, t_type)
                          if is_array and not t_type.endswith('()'): t_type += "()"
-                         scope.define(current_name, t_type, 'Variable')
+                         scope.define(current_name, t_type, symbol_kind)
 
                      # We defined the variable, now let's analyze the assignment expression
                      # We need to find where the expression ends (at comma or end of tokens)
@@ -863,10 +1075,13 @@ class Analyzer:
 
                      expr_tokens = tokens_list[expr_start:expr_end]
                      self.analyze_statement(expr_tokens, scope, filename, context, with_stack)
+                     if is_const:
+                         self._validate_const_expression(expr_tokens, scope, filename, context, current_name)
 
                      current_name = None
                      current_type = 'Variant'
                      is_array = False
+                     explicit_as = False
 
                      i = expr_end
                 else:
@@ -876,21 +1091,24 @@ class Analyzer:
                 if current_name:
                     if current_name.lower() in scope.symbols:
                         self.errors.append({
-                            "file": filename, 
+                            "file": filename,
                             "line": tokens[0].line,
                             "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
                         })
                     else:
                         t_type = current_type
+                        if not explicit_as:
+                            t_type = self._apply_def_type(current_name, t_type)
                         if is_array and not t_type.endswith('()'): t_type += "()"
-                        scope.define(current_name, t_type, 'Variable')
+                        scope.define(current_name, t_type, symbol_kind)
                     current_name = None
                     current_type = 'Variant'
                     is_array = False
+                    explicit_as = False
                 i += 1
             else:
                 i += 1
-        
+
         if current_name:
              if current_name.lower() in scope.symbols:
                  self.errors.append({
@@ -900,8 +1118,10 @@ class Analyzer:
                  })
              else:
                  t_type = current_type
+                 if not explicit_as:
+                     t_type = self._apply_def_type(current_name, t_type)
                  if is_array and not t_type.endswith('()'): t_type += "()"
-                 scope.define(current_name, t_type, 'Variable')
+                 scope.define(current_name, t_type, symbol_kind)
 
     def resolve_expression_type(self, tokens, scope, with_stack):
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)

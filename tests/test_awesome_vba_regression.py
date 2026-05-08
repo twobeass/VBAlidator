@@ -24,7 +24,7 @@ AWESOME_DIR = Path(__file__).resolve().parent / "awesome_vba"
 # ceiling — never a target. Lower me as the analyzer improves.
 BASELINE: dict[str, tuple[int, str]] = {
     "JSONBag": (12, "baseline phase-1; ComctlLib types not in std model"),
-    "VBA-MemoryTools-master": (17, "baseline phase-1; LibMemory member resolution"),
+    "VBA-MemoryTools-master": (18, "baseline phase-2; +1 VBA231 Const-from-variable in LibMemory"),
     "VbTrickTimer-master": (54, "baseline phase-1; many API declares + WithEvents"),
     "stdVBA-master": (342, "baseline phase-2; +1 VBA201 (one cross-procedure label jump)"),
 }

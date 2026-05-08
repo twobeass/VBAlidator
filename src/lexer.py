@@ -1,5 +1,142 @@
 import re
 
+
+# VBA accepts a wide variety of date / time literal formats and
+# Python's `datetime.strptime` is too strict for some (e.g. `1/1/100`
+# fails because `%Y` insists on 4 digits). We validate structurally
+# instead: split off an optional time component, check the date
+# component against a small set of patterns, and range-check each
+# field.
+
+_DATE_PATTERNS = (
+    # m/d/y or m/d/yyyy (US, the VBA default)
+    re.compile(r"^\s*(?P<m>\d{1,2})\s*/\s*(?P<d>\d{1,2})\s*/\s*(?P<y>\d{1,4})\s*$"),
+    # yyyy-mm-dd (ISO)
+    re.compile(r"^\s*(?P<y>\d{1,4})\s*-\s*(?P<m>\d{1,2})\s*-\s*(?P<d>\d{1,2})\s*$"),
+    # d-mmm-yyyy / d-mmm-yy (e.g. 1-Jan-2020)
+    re.compile(
+        r"^\s*(?P<d>\d{1,2})\s*-\s*(?P<mname>"
+        r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|"
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december"
+        r")\s*-\s*(?P<y>\d{1,4})\s*$",
+        re.IGNORECASE,
+    ),
+    # MMMM d, yyyy / MMMM d yyyy
+    re.compile(
+        r"^\s*(?P<mname>"
+        r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|"
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december"
+        r")\s+(?P<d>\d{1,2})\s*,?\s+(?P<y>\d{1,4})\s*$",
+        re.IGNORECASE,
+    ),
+)
+
+_TIME_PATTERN = re.compile(
+    r"^\s*(?P<h>\d{1,2})(?:\s*:\s*(?P<mi>\d{1,2}))?"
+    r"(?:\s*:\s*(?P<s>\d{1,2}))?"
+    r"(?:\s*(?P<ampm>am|pm))?\s*$",
+    re.IGNORECASE,
+)
+
+_DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def _is_valid_date_part(m, d, y):
+    if not (1 <= m <= 12):
+        return False
+    if not (1 <= y <= 9999):
+        return False
+    if not (1 <= d <= _DAYS_IN_MONTH[m - 1]):
+        return False
+    return True
+
+
+def _is_valid_time_part(content):
+    m = _TIME_PATTERN.match(content)
+    if not m:
+        return False
+    h = int(m.group("h"))
+    mi = int(m.group("mi") or 0)
+    s = int(m.group("s") or 0)
+    ampm = m.group("ampm")
+    if ampm:
+        # 12-hour clock: hour must be 1..12
+        if not (1 <= h <= 12):
+            return False
+    else:
+        if not (0 <= h <= 23):
+            return False
+    return 0 <= mi <= 59 and 0 <= s <= 59
+
+
+def _is_valid_vba_date_literal(content):
+    """Validate the text between the surrounding `#` of a VBA date literal.
+
+    Accepts date-only, time-only, or date + time forms. Range-checks the
+    individual components rather than relying on Python `strptime`,
+    which is stricter than VBA (e.g. it rejects 3-digit years).
+    """
+    if content is None:
+        return False
+    s = content.strip()
+    if not s:
+        return False
+
+    # Try splitting "<date> <time>" — the date contains `/` or `-` and the
+    # time contains `:`. If both are present we test each side.
+    parts = s.split()
+    if len(parts) >= 2:
+        # Find the split: contiguous date tokens up to where a `:` appears
+        for i in range(len(parts) - 1, 0, -1):
+            left = " ".join(parts[:i])
+            right = " ".join(parts[i:])
+            if ":" in right and (":" not in left):
+                if _match_date(left) and _is_valid_time_part(right):
+                    return True
+        # AM/PM at the end
+        if parts[-1].lower() in ("am", "pm"):
+            left = " ".join(parts[:-2]) if len(parts) >= 2 else ""
+            time_part = " ".join(parts[-2:]) if len(parts) >= 2 else ""
+            if left and _match_date(left) and _is_valid_time_part(time_part):
+                return True
+
+    # Date only?
+    if _match_date(s):
+        return True
+    # Time only?
+    if _is_valid_time_part(s):
+        return True
+    return False
+
+
+def _match_date(s):
+    for pat in _DATE_PATTERNS:
+        m = pat.match(s)
+        if not m:
+            continue
+        gd = m.groupdict()
+        try:
+            day = int(gd["d"])
+            year = int(gd["y"])
+            if "m" in gd and gd.get("m"):
+                month = int(gd["m"])
+            else:
+                month = _MONTH_NAME_TO_NUM[gd["mname"].lower()[:3]]
+        except (KeyError, ValueError):
+            continue
+        if _is_valid_date_part(month, day, year):
+            return True
+    return False
+
+
+_MONTH_NAME_TO_NUM = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
 class Token:
     def __init__(self, type, value, line, column):
         self.type = type
@@ -11,11 +148,13 @@ class Token:
         return f"Token({self.type}, {repr(self.value)}, Line:{self.line})"
 
 class LexerError:
-    """Reported when the lexer encounters a character it cannot tokenize."""
+    """Reported when the lexer encounters a character it cannot tokenize
+    or a malformed literal (date, …)."""
     def __init__(self, char, line, column):
         self.char = char
         self.line = line
         self.column = column
+        self.rule_id = "VBA_LEX001"
         self.message = (
             f"Lexer error: unexpected character {char!r} at line {line}, "
             f"column {column}."
@@ -26,7 +165,7 @@ class LexerError:
             "file": filename,
             "line": self.line,
             "column": self.column,
-            "rule_id": "VBA_LEX001",
+            "rule_id": self.rule_id,
             "severity": "error",
             "message": self.message,
         }
@@ -48,8 +187,12 @@ class Lexer:
         self.token_specs = [
             ('COMMENT', r"'.*"),
             ('STRING', r'"(""|[^"])*"'),
-            ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
+            # DATELITERAL must come before PREPROCESSOR — both start with `#`
+            # and the regex engine takes the first match in the alternation,
+            # so PREPROCESSOR's `#[a-zA-Z_]\w*` would otherwise eat
+            # `#January` from `#January 1, 2020#` and leave a stray `#`.
             ('DATELITERAL', r'\#[^#\r\n]+\#'),
+            ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
             ('HEX', r'&H[0-9A-Fa-f]+'),
             ('OCTAL', r'&O[0-7]+'),
             ('FLOAT', r'(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+'),
@@ -89,6 +232,18 @@ class Lexer:
                 self.errors.append(LexerError(value, self.line, self.column))
                 self.column += len(value)
                 continue
+            elif kind == 'DATELITERAL':
+                # Strip surrounding `#` and validate the contents.
+                inner = value[1:-1] if len(value) >= 2 else value
+                if not _is_valid_vba_date_literal(inner):
+                    err = LexerError(value, self.line, self.column)
+                    err.message = (
+                        f"Invalid date literal {value!r} at line {self.line}, "
+                        f"column {self.column}: not a recognised VBA date / time "
+                        f"format."
+                    )
+                    err.rule_id = "VBA_LEX002"
+                    self.errors.append(err)
 
             yield Token(kind, value, self.line, self.column)
             self.column += len(value)

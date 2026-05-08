@@ -4,16 +4,18 @@ class Node:
     pass
 
 class VariableNode(Node):
-    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False, mechanism='ByRef'):
+    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False, mechanism='ByRef', is_const=False):
         self.name = name
         self.type_name = type_name
         self.scope = scope # Dim (Local), Private, Public, Global
         self.is_optional = is_optional
         self.is_paramarray = is_paramarray
         self.mechanism = mechanism
+        self.is_const = is_const
 
     def __repr__(self):
-        return f"Var({self.name} As {self.type_name} [{self.mechanism}])"
+        decl = "Const " if self.is_const else ""
+        return f"{decl}Var({self.name} As {self.type_name} [{self.mechanism}])"
 
 class StatementNode(Node):
     def __init__(self, tokens):
@@ -63,6 +65,9 @@ class ModuleNode(Node):
         self.variables = [] # Module-level variables
         self.procedures = []
         self.types = {} # User Defined Types
+        # Phase 2.9 — DefInt/DefBool/DefStr… implicit typing per letter.
+        # Lowercased single-letter ('a'..'z') → type name (Integer, Long, …).
+        self.def_type_map = {}
 
 class IfNode(Node):
     def __init__(self, condition_tokens, true_block, else_blocks=None, else_block=None):
@@ -198,10 +203,11 @@ class VBAParser:
             elif self.match('IDENTIFIER', 'Implements'):
                 self.consume()
                 self.consume_statement()
-            elif self.current_token.type == 'IDENTIFIER' and self.current_token.value.lower().startswith('def'):
-                # Handle DefInt, DefBool, etc.
-                self.consume()
-                self.consume_statement()
+            elif self.current_token.type == 'IDENTIFIER' and self.current_token.value.lower() in (
+                'defbool', 'defbyte', 'defint', 'deflng', 'deflnglng', 'deflngptr',
+                'defcur', 'defsng', 'defdbl', 'defdate', 'defstr', 'defobj', 'defvar',
+            ):
+                self._parse_def_type(module)
             elif self.match('IDENTIFIER', 'Public') or self.match('IDENTIFIER', 'Private') or self.match('IDENTIFIER', 'Friend') or self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Const') or self.match('IDENTIFIER', 'Global'):
                 self.parse_declaration(module)
             elif self.match('IDENTIFIER', 'Sub') or self.match('IDENTIFIER', 'Function') or self.match('IDENTIFIER', 'Property'):
@@ -230,6 +236,42 @@ class VBAParser:
                 self.consume_statement()
         
         return module
+
+    _DEFTYPE_TO_TYPE = {
+        'defbool': 'Boolean', 'defbyte': 'Byte', 'defint': 'Integer',
+        'deflng': 'Long', 'deflnglng': 'LongLong', 'deflngptr': 'LongPtr',
+        'defcur': 'Currency', 'defsng': 'Single', 'defdbl': 'Double',
+        'defdate': 'Date', 'defstr': 'String', 'defobj': 'Object',
+        'defvar': 'Variant',
+    }
+
+    def _parse_def_type(self, module):
+        """Parse `DefInt A-K, X` etc. and update module.def_type_map."""
+        keyword = self.current_token.value.lower()
+        target_type = self._DEFTYPE_TO_TYPE.get(keyword, 'Variant')
+        self.advance()  # consume DefXxx
+
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            if self.current_token.type == 'IDENTIFIER' and len(self.current_token.value) >= 1:
+                first = self.current_token.value[0].lower()
+                last = first
+                self.advance()
+                if self.match('OPERATOR', '-'):
+                    self.advance()
+                    if self.current_token.type == 'IDENTIFIER' and len(self.current_token.value) >= 1:
+                        last = self.current_token.value[0].lower()
+                        self.advance()
+                # Map every letter in the inclusive range
+                if first.isalpha() and last.isalpha():
+                    lo = min(ord(first), ord(last))
+                    hi = max(ord(first), ord(last))
+                    for code in range(lo, hi + 1):
+                        module.def_type_map[chr(code)] = target_type
+            elif self.match('OPERATOR', ','):
+                self.advance()
+            else:
+                self.advance()
+        self.consume_statement()
 
     def consume_statement(self):
         while self.current_token.type not in ('NEWLINE', 'EOF'):
@@ -355,10 +397,12 @@ class VBAParser:
             return
 
         # Check if Const
+        is_const = False
         if scope.lower() in ('public', 'private', 'global', 'friend'):
              if self.match('IDENTIFIER', 'Const'):
+                 is_const = True
                  self.advance()
-        
+
         # Check if WithEvents
         if self.match('IDENTIFIER', 'WithEvents'):
             self.advance()
@@ -386,7 +430,7 @@ class VBAParser:
                      while self.current_token.type not in ('NEWLINE', 'EOF') and not self.match('OPERATOR', ','):
                          self.advance()
 
-                module.variables.append(VariableNode(var_name, var_type, scope))
+                module.variables.append(VariableNode(var_name, var_type, scope, is_const=is_const))
             
             if self.match('OPERATOR', ','):
                 self.advance()
