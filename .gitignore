@@ -5,3 +5,11 @@ vbalidator.egg-info/
 vba_report.json
 debug_model.py
 tests/big/
+
+# Test / coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

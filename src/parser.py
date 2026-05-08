@@ -1,4 +1,4 @@
-from .lexer import Lexer, Token
+from .lexer import Token
 
 class Node:
     pass
@@ -93,7 +93,17 @@ class VBAParser:
         self.filename = filename
         self.pos = 0
         self.current_token = None
+        self.errors = []  # collected syntax errors (dicts)
         self.advance()
+
+    def _record_syntax_error(self, message, line=None, rule_id="VBA_SYN001"):
+        self.errors.append({
+            "file": self.filename,
+            "line": line if line is not None else self.current_token.line,
+            "rule_id": rule_id,
+            "severity": "error",
+            "message": message,
+        })
 
     def advance(self):
         if self.pos < len(self.tokens):
@@ -227,11 +237,11 @@ class VBAParser:
         if self.match('IDENTIFIER', 'Declare'):
             self.advance() # consume Declare
             
-            # Optional PtrSafe
-            is_ptrsafe = False
+            # Optional PtrSafe (will be validated against 64-bit mode in P3.3)
+            is_ptrsafe = False  # noqa: F841
             if self.match('IDENTIFIER', 'PtrSafe'):
                 self.advance()
-                is_ptrsafe = True
+                is_ptrsafe = True  # noqa: F841
             
             proc_type = "Sub"
             if self.match('IDENTIFIER', 'Function'):
@@ -419,7 +429,9 @@ class VBAParser:
                 # VALIDATION: Check for unexpected block terminators
                 if val in ('next', 'loop', 'else', 'elseif', 'wend'):
                     # Found a block keyword that was NOT in end_markers -> Unexpected
-                    print(f"{self.filename}:{self.current_token.line}: Syntax Error: Unexpected '{self.current_token.value}'")
+                    self._record_syntax_error(
+                        f"Syntax Error: Unexpected '{self.current_token.value}'."
+                    )
                     # We consume it to avoid infinite loop, but it's an error
                     self.consume_statement()
                     continue
@@ -428,7 +440,9 @@ class VBAParser:
                     peek_val = self.peek().value.lower()
                     if peek_val in ('if', 'select', 'with', 'function', 'sub', 'property'):
                         # Found End X that was NOT in end_markers -> Unexpected
-                        print(f"{self.filename}:{self.current_token.line}: Syntax Error: Unexpected 'End {self.peek().value}'")
+                        self._record_syntax_error(
+                            f"Syntax Error: Unexpected 'End {self.peek().value}'."
+                        )
                         self.advance() # End
                         self.advance() # X
                         self.consume_statement()
@@ -478,7 +492,7 @@ class VBAParser:
         self.consume('IDENTIFIER', 'While')
         condition_tokens = self.collect_statement()  # Everything until newline
         
-        body = self.parse_block(end_markers=["Wend"])
+        body = self.parse_block(end_markers=["Wend"])  # noqa: F841 — body wired up in Phase 1
         
         self.consume('IDENTIFIER', 'Wend')
         self.consume_statement()
@@ -517,7 +531,9 @@ class VBAParser:
             
         if not self.match('IDENTIFIER', 'Then'):
              # Syntax Error: Missing Then
-             print(f"Syntax Error: Missing 'Then' at line {self.current_token.line}")
+             self._record_syntax_error(
+                 "Syntax Error: Missing 'Then' after If condition."
+             )
              self.consume_statement() # Recover
              return None
              
@@ -576,25 +592,46 @@ class VBAParser:
              return IfNode(condition_tokens, true_block, else_blocks, else_block)
              
         else:
-             # Single Line If
-             # Parse until Newline
-             # We must consume ALL statements on this line, including those separated by colons.
-             condition_tokens.extend(self.collect_statement(consume_newline=False))
-             
-             while self.current_token.type != 'NEWLINE' and self.current_token.type != 'EOF':
-                 # Loop for chained statements `If ... Then ... : ...`
-                 
-                 # The previous collect_statement(consume_newline=False) either stopped at ':' (consumed) or NEWLINE (not consumed).
-                 # If it stopped at ':', self.current_token is the next statement's start.
-                 # If it stopped at NEWLINE, we wouldn't be in this loop (due to while condition).
-                 
-                 # So we simply collect the next statement.
-                 stmt_tokens = self.collect_statement(consume_newline=False)
-                 condition_tokens.extend(stmt_tokens)
-             
-             # Consume the final newline
+             # Single Line If: If <cond> Then <stmt[: stmt]>* [Else <stmt[: stmt]>*]
+             # Bug fix: previously this branch fell through and returned None,
+             # which caused condition + body tokens to be silently discarded
+             # (no analyzer pass on them). Now we build a proper IfNode so the
+             # analyzer walks the condition and each body statement.
+             true_block = self._collect_inline_block(stop_on_else=True)
+             else_block = None
+             if self.match('IDENTIFIER', 'Else'):
+                 self.advance()
+                 else_block = self._collect_inline_block(stop_on_else=False)
+
              if self.match('NEWLINE'):
                  self.advance()
+
+             return IfNode(condition_tokens, true_block, [], else_block)
+
+    def _collect_inline_block(self, stop_on_else):
+        """Collect colon-separated statements on the current line.
+
+        Used for single-line If bodies. Unlike :meth:`collect_statement` this
+        also breaks on the ``Else`` keyword so that ``If ... Then a Else b``
+        parses cleanly into separate true / else blocks.
+        """
+        block = []
+        while self.current_token.type not in ('NEWLINE', 'EOF'):
+            if stop_on_else and self.match('IDENTIFIER', 'Else'):
+                break
+            stmt_tokens = []
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                if stop_on_else and self.match('IDENTIFIER', 'Else'):
+                    break
+                if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                    stmt_tokens.append(self.current_token)
+                    self.advance()
+                    break
+                stmt_tokens.append(self.current_token)
+                self.advance()
+            if stmt_tokens:
+                block.append(StatementNode(stmt_tokens))
+        return block
 
 
 
@@ -605,7 +642,7 @@ class VBAParser:
             self.advance()
         self.consume_statement()
         
-        body = self.parse_block(end_markers=["Next"])
+        body = self.parse_block(end_markers=["Next"])  # noqa: F841 — body wired up in Phase 1
         
         self.consume('IDENTIFIER', 'Next')
         # Optional variable
@@ -621,7 +658,7 @@ class VBAParser:
              self.advance()
         self.consume_statement()
         
-        body = self.parse_block(end_markers=["Loop"])
+        body = self.parse_block(end_markers=["Loop"])  # noqa: F841 — body wired up in Phase 1
         
         self.consume('IDENTIFIER', 'Loop')
         while self.current_token.type not in ('NEWLINE', 'EOF'):
@@ -639,7 +676,7 @@ class VBAParser:
         
         # Select block ends with End Select
         
-        body = self.parse_block(end_markers=["End Select"])
+        body = self.parse_block(end_markers=["End Select"])  # noqa: F841 — body wired up in Phase 1
         
         self.consume('IDENTIFIER', 'End')
         self.consume('IDENTIFIER', 'Select')

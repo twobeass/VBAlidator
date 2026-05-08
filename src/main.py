@@ -2,12 +2,12 @@ import argparse
 import os
 import sys
 import json
-from colorama import init, Fore, Style
+from colorama import init, Fore
 
 from .config import Config
 from .lexer import Lexer
 from .preprocessor import Preprocessor
-from .parser import VBAParser, FormParser, ModuleNode
+from .parser import VBAParser, FormParser
 from .analyzer import Analyzer
 
 init(autoreset=True)
@@ -80,7 +80,11 @@ def main():
             # Lexer
             lexer = Lexer(code_content)
             tokens = list(lexer.tokenize())
-            
+
+            # Surface any lexer errors (previously silently dropped)
+            for lex_err in lexer.errors:
+                analyzer.errors.append(lex_err.to_dict(filename=filename))
+
             # Preprocessor
             pp = Preprocessor(tokens, config.definitions)
             processed_tokens = list(pp.process())
@@ -90,11 +94,15 @@ def main():
             module_node = parser.parse_module()
             module_node.filename = filename
             module_node.module_type = module_type
-            
+
+            # Surface syntax errors collected by the parser
+            for syn_err in parser.errors:
+                analyzer.errors.append(syn_err)
+
             # Add controls to module variables if Form
             if ext == '.frm':
                 module_node.variables.extend(controls)
-                
+
             analyzer.add_module(module_node)
             
         except Exception as e:

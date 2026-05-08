@@ -10,12 +10,35 @@ class Token:
     def __repr__(self):
         return f"Token({self.type}, {repr(self.value)}, Line:{self.line})"
 
+class LexerError:
+    """Reported when the lexer encounters a character it cannot tokenize."""
+    def __init__(self, char, line, column):
+        self.char = char
+        self.line = line
+        self.column = column
+        self.message = (
+            f"Lexer error: unexpected character {char!r} at line {line}, "
+            f"column {column}."
+        )
+
+    def to_dict(self, filename=""):
+        return {
+            "file": filename,
+            "line": self.line,
+            "column": self.column,
+            "rule_id": "VBA_LEX001",
+            "severity": "error",
+            "message": self.message,
+        }
+
+
 class Lexer:
     def __init__(self, code):
         self.code = code
         self.pos = 0
         self.line = 1
         self.column = 1
+        self.errors = []
 
         # Regex patterns
         self.token_specs = [
@@ -30,10 +53,10 @@ class Lexer:
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
             ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\]'), # Added : and \ to operator
-            ('IDENTIFIER', r'[a-zA-Z_]\w*'), 
+            ('IDENTIFIER', r'[a-zA-Z_]\w*'),
             ('MISMATCH', r'.'),
         ]
-        
+
         # Compile regex
         self.master_pat = re.compile('|'.join('(?P<%s>%s)' % pair for pair in self.token_specs), re.IGNORECASE)
 
@@ -41,7 +64,7 @@ class Lexer:
         for mo in self.master_pat.finditer(self.code):
             kind = mo.lastgroup
             value = mo.group()
-            
+
             if kind == 'LINE_CONTINUATION':
                 self.line += 1
                 self.column = 1
@@ -55,10 +78,12 @@ class Lexer:
                 self.column += len(value)
                 continue
             elif kind == 'MISMATCH':
+                # Don't drop silently: capture so callers can surface the error
+                # instead of silently producing a garbage token stream.
+                self.errors.append(LexerError(value, self.line, self.column))
                 self.column += len(value)
-                # yield Token('UNKNOWN', value, self.line, self.column)
                 continue
-            
+
             yield Token(kind, value, self.line, self.column)
             self.column += len(value)
 

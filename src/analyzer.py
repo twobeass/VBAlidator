@@ -1,4 +1,4 @@
-from .parser import VariableNode, ProcedureNode, WithNode, StatementNode, IfNode
+from .parser import ProcedureNode, WithNode, StatementNode, IfNode  # noqa: F401
 
 class SymbolTable:
     def __init__(self, name, parent=None, scope_type='Block'):

@@ -34,8 +34,7 @@ class Preprocessor:
                     return False # Assume undefined is False
             
             return bool(eval(expr_str, {}, SafeDict(context)))
-        except Exception as e:
-            # print(f"Preprocessor Eval Error: {e} in {expr_str}")
+        except Exception:
             return False
 
     def process(self):
