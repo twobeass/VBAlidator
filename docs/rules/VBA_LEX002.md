@@ -24,4 +24,4 @@ Use m/d/y, yyyy-mm-dd, d-mmm-y, or 'MMMM d, y' format with valid date components
 
 ---
 
-_Source: [src/rules.py](../../src/rules.py) — entry `VBA_LEX002`._
+_Source: [src/rules.py](https://github.com/twobeass/VBAlidator/blob/main/src/rules.py) — entry `VBA_LEX002`._

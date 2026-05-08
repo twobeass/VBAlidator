@@ -24,4 +24,4 @@ Replace the offending character with its ASCII equivalent or remove it.
 
 ---
 
-_Source: [src/rules.py](../../src/rules.py) — entry `VBA_LEX001`._
+_Source: [src/rules.py](https://github.com/twobeass/VBAlidator/blob/main/src/rules.py) — entry `VBA_LEX001`._

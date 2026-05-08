@@ -1,6 +1,7 @@
 """Tests for Phase 4.5 (round-trip verification) and 4.6 (rule docs)."""
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -140,14 +141,27 @@ _RULE_DIR = ROOT / "docs" / "rules"
 
 
 def test_rule_docs_generator_is_idempotent(tmp_path):
-    """Running the generator twice must not change any file (no diff)."""
+    """Running the generator twice must not change any file (no diff).
+
+    Reads use explicit UTF-8 — the catalogue contains emoji severity
+    badges (🔴 / 🟡 / 🔵) and Path.read_text would fall back to
+    cp1252 on Windows without it.
+    """
     script = ROOT / "tools" / "generate_rule_docs.py"
-    # First pass: ensure docs are up-to-date.
-    subprocess.run([sys.executable, str(script)], check=True, cwd=ROOT)
-    snapshot = {p.name: p.read_text() for p in _RULE_DIR.iterdir() if p.is_file()}
-    # Second pass: must be byte-identical.
-    subprocess.run([sys.executable, str(script)], check=True, cwd=ROOT)
-    after = {p.name: p.read_text() for p in _RULE_DIR.iterdir() if p.is_file()}
+    # Subprocess uses utf-8 stdout to avoid Windows console encoding issues
+    # when the script prints status. The Python interpreter itself reads
+    # the script as UTF-8 via PYTHONUTF8.
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    subprocess.run([sys.executable, str(script)], check=True, cwd=ROOT, env=env)
+    snapshot = {
+        p.name: p.read_text(encoding="utf-8")
+        for p in _RULE_DIR.iterdir() if p.is_file()
+    }
+    subprocess.run([sys.executable, str(script)], check=True, cwd=ROOT, env=env)
+    after = {
+        p.name: p.read_text(encoding="utf-8")
+        for p in _RULE_DIR.iterdir() if p.is_file()
+    }
     assert snapshot == after, "generator is not idempotent"
 
 
@@ -162,7 +176,7 @@ def test_every_registered_rule_has_a_doc_page():
 
 
 def test_index_lists_every_rule():
-    text = (_RULE_DIR / "index.md").read_text()
+    text = (_RULE_DIR / "index.md").read_text(encoding="utf-8")
     for rule_id in known_rule_ids():
         assert re.search(rf"`{rule_id}`", text), f"{rule_id} missing from index.md"
 
@@ -171,7 +185,7 @@ def test_each_rule_page_has_required_sections():
     """Every per-rule page must include Description, fail/ok examples and
     a fix hint. This guards against shipping new rules with empty docs."""
     for rule in all_rules():
-        page = (_RULE_DIR / f"{rule.rule_id}.md").read_text()
+        page = (_RULE_DIR / f"{rule.rule_id}.md").read_text(encoding="utf-8")
         assert "## Description" in page
         assert "## How to fix" in page
         # Most pages have both examples; allow empty when description-only.

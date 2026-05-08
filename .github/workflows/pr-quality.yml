@@ -33,10 +33,9 @@ jobs:
             chore
             style
           requireScope: false
-          subjectPattern: ^(?![A-Z]).+$
-          subjectPatternError: |
-            The subject "{subject}" must start with a lowercase letter.
-            Conventional Commit example: `feat(precompiler): add VBA350 rule`.
+          # No subject-case constraint — both `feat(scope): add rule` and
+          # `feat(scope): Add rule` are accepted. The descriptive value of
+          # the title outweighs a stylistic case rule.
 
   commitlint:
     name: Commit messages follow Conventional Commits

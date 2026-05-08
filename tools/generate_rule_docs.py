@@ -75,7 +75,10 @@ def _rule_page(rule: Rule) -> str:
     parts += [
         "---",
         "",
-        f"_Source: [src/rules.py](../../src/rules.py) — entry `{rule.rule_id}`._",
+        # Absolute GitHub URL — keeps the link valid both when the page
+        # is rendered through MkDocs (where `../../src/...` would land
+        # outside the docs tree and break --strict) and on github.com.
+        f"_Source: [src/rules.py](https://github.com/twobeass/VBAlidator/blob/main/src/rules.py) — entry `{rule.rule_id}`._",
         "",
     ]
     return "\n".join(parts)
@@ -113,22 +116,28 @@ def main() -> None:
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     rules = all_rules()
 
-    # Per-rule pages
+    # Per-rule pages.
+    # The catalogue contains emoji severity badges (🔴 / 🟡 / 🔵) so we
+    # always read & write UTF-8 explicitly. Path.read_text / write_text
+    # fall back to the platform default (cp1252 on Windows) without an
+    # explicit encoding, which would crash on the emoji glyphs.
     written = 0
     expected_files = {"index.md"}
     for rule in rules:
         page = _rule_page(rule)
         path = DOCS_DIR / f"{rule.rule_id}.md"
-        if not path.exists() or path.read_text() != page:
-            path.write_text(page)
+        existing = path.read_text(encoding="utf-8") if path.exists() else None
+        if existing != page:
+            path.write_text(page, encoding="utf-8")
             written += 1
         expected_files.add(path.name)
 
     # Index
     index_path = DOCS_DIR / "index.md"
     index_text = _index_page(rules)
-    if not index_path.exists() or index_path.read_text() != index_text:
-        index_path.write_text(index_text)
+    existing_index = index_path.read_text(encoding="utf-8") if index_path.exists() else None
+    if existing_index != index_text:
+        index_path.write_text(index_text, encoding="utf-8")
         written += 1
 
     # Prune stale rule pages.

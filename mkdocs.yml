@@ -80,6 +80,21 @@ markdown_extensions:
 plugins:
   - search
 
+# The 35 auto-generated rule pages are linked from `rules/index.md`
+# but not listed individually in the navigation. Without this block,
+# `mkdocs build --strict` would treat every rule page as
+# "documentation file present but not in navigation" and fail.
+validation:
+  nav:
+    omitted_files: ignore
+    not_found: warn
+    absolute_links: ignore
+  links:
+    not_found: warn
+    absolute_links: ignore
+    unrecognized_links: ignore
+    anchors: warn
+
 extra:
   social:
     - icon: fontawesome/brands/github

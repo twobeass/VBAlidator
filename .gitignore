@@ -13,3 +13,10 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# MkDocs build output (deployed via .github/workflows/docs.yml)
+/site/
+
+# Build / release artefacts
+/dist/
+/wheels/
