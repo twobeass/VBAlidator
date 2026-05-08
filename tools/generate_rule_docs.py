@@ -85,12 +85,16 @@ def _rule_page(rule: Rule) -> str:
 
 
 def _index_page(rules: list[Rule]) -> str:
+    intro = (
+        "Stable rule IDs emitted by VBAlidator. Each row links to the "
+        "rule's detail page. Use the `rule_id` to silence specific "
+        "findings in your CI ignore list — the IDs do not change "
+        "between releases."
+    )
     lines = [
         "# VBAlidator rule catalogue",
         "",
-        "Stable rule IDs emitted by VBAlidator. Each row links to the rule's"
-        " detail page. Use the `rule_id` to silence specific findings in"
-        " your CI ignore list — the IDs do not change between releases.",
+        intro,
         "",
         "| Rule | Severity | Category | Phase | Title |",
         "| --- | --- | --- | --- | --- |",

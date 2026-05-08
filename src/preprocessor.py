@@ -32,8 +32,8 @@ class SafeDict(dict):
 
 # Whitelisted boolean and comparison operators.
 _BOOL_OPS = {
-    ast.And: lambda values: all(values),
-    ast.Or: lambda values: any(values),
+    ast.And: all,
+    ast.Or: any,
 }
 
 _UNARY_OPS = {

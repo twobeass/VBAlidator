@@ -222,6 +222,9 @@ def _verify_with_win32com(
         try:
             app.DisplayAlerts = False
         except Exception:
+            # Best-effort: some hosts don't expose DisplayAlerts on every
+            # build / SKU, but the call still attempts the property. A
+            # failure here doesn't affect compile verification.
             pass
 
     tmp = tempfile.NamedTemporaryFile(suffix=cfg["ext"], delete=False)
@@ -273,18 +276,27 @@ def _verify_with_win32com(
             })
 
     finally:
+        # All three teardown calls are deliberately best-effort. The
+        # finally block runs even when the prior block already failed
+        # (Office crash, COM disconnect, file lock), so re-raising here
+        # would mask the original error and is never useful.
         try:
             wb.Close(SaveChanges=False)
         except Exception:
+            # Workbook may have been closed by the host (`Quit` callback)
+            # or never opened cleanly. Either way, nothing actionable.
             pass
         try:
             app.Quit()
         except Exception:
+            # Office may already be shutting down; ignore.
             pass
         if not keep_workbook:
             try:
                 os.unlink(tmp_path)
             except OSError:
+                # File handle may still be held by Office on a slow
+                # machine; the temp dir is cleaned up by the OS later.
                 pass
 
     return issues

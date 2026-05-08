@@ -301,6 +301,10 @@ class VBAParser:
                 try:
                     module.options['base'] = int(self.current_token.value)
                 except ValueError:
+                    # Malformed `Option Base <not-an-int>` — leave the
+                    # default (0). The lexer's INTEGER regex should make
+                    # this unreachable in practice, but we keep the
+                    # guard so a corrupted stream cannot crash the parser.
                     pass
                 self.advance()
         elif kind == 'private':

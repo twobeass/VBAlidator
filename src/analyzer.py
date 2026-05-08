@@ -1,5 +1,4 @@
 from .parser import (  # noqa: F401
-    CaseClauseNode,
     DoNode,
     EraseNode,
     ForNode,
