@@ -1,383 +1,392 @@
+#!/usr/bin/env python3
+"""Generate a VBAlidator object-model JSON from a host's COM type
+libraries.
+
+Workflow
+--------
+
+1. Run `VBA_Model_Exporter.bas` inside the VBE of your target host
+   (Excel / Word / Access / PowerPoint / Outlook / Visio / AutoCAD).
+   It writes a `vba_references.json` file listing every referenced
+   library with its GUID + version.
+
+2. Run this script:
+
+      python tools/generate_model.py path/to/vba_references.json -o vba_model.json
+
+   It uses `comtypes` to introspect every library: extracts dispinterfaces,
+   coclasses, enums and module-level constants and emits a single
+   `vba_model.json` consumable via `vbalidator --model vba_model.json`
+   or `precheck(model_path=…)`.
+
+3. The generated model is layered on top of the bundled `std_model.json`
+   and any `--host` model, so it only needs to cover host-specific
+   types — VBA built-ins are already there.
+
+Platform: Windows + the target host installed (comtypes drives COM).
+On non-Windows the script exits with an actionable error.
+"""
+from __future__ import annotations
+
+import argparse
 import json
+import logging
 import os
 import sys
-import traceback
+from pathlib import Path
+from typing import Any
 
-try:
-    import comtypes.client
-    import comtypes
-except ImportError:
-    print("Error: 'comtypes' library is required. Install it using: pip install comtypes")
-    sys.exit(1)
+LOG = logging.getLogger("vbalidator.gen_model")
 
-def generate_model():
-    base_path = os.getcwd() 
-    ref_file = "vba_references.json"
-    
-    if not os.path.exists(ref_file):
-        possible_paths = [
-            os.path.join(base_path, ref_file),
-            os.path.join(base_path, "tools", ref_file),
-            os.path.join(os.path.dirname(base_path), ref_file),
-        ]
-        found = False
-        for p in possible_paths:
-            if os.path.exists(p):
-                ref_file = p
-                found = True
-                break
-        if not found:
-            print(f"Error: {ref_file} not found. Did you run the VBA Exporter?")
-            sys.exit(1)
 
-    print(f"Loading references from {ref_file}...")
-    with open(ref_file, 'r') as f:
-        ref_data = json.load(f)
+def _import_comtypes():
+    try:
+        import comtypes  # noqa: F401  (re-exported via comtypes.client)
+        import comtypes.client as cc
+    except ImportError as exc:  # pragma: no cover — Windows-only
+        sys.stderr.write(
+            "Error: 'comtypes' is required.\n"
+            "  pip install comtypes\n"
+            f"  (import error: {exc})\n"
+        )
+        sys.exit(1)
+    return cc
 
-    model = {
+
+# ---------------------------------------------------------------- helpers
+
+
+def _load_module(cc, ref: dict[str, Any]):
+    """Resolve a library entry into a comtypes module. First by GUID +
+    version, then by absolute path, then fall through to None."""
+    guid = ref.get("guid")
+    major = ref.get("major")
+    minor = ref.get("minor")
+    path = ref.get("path", "")
+
+    if guid:
+        try:
+            return cc.GetModule((guid, major or 1, minor or 0))
+        except (OSError, ValueError, AttributeError) as exc:
+            LOG.debug("GetModule(GUID) failed for %s: %s", ref.get("name"), exc)
+    if path and os.path.exists(path):
+        try:
+            return cc.GetModule(path)
+        except (OSError, ValueError, AttributeError) as exc:
+            LOG.debug("GetModule(path) failed for %s: %s", ref.get("name"), exc)
+    return None
+
+
+def _extract_member_args(method_tuple: tuple) -> list[dict[str, Any]]:
+    """comtypes serialises each method as
+    `(['flags'], 'ReturnType', 'Name', (['in'], 'ArgType', 'ArgName'), …)`.
+    Walk that and surface a uniform list of arg dicts."""
+    args_info: list[dict[str, Any]] = []
+    if len(method_tuple) <= 3:
+        return args_info
+
+    candidates = []
+    for i in range(3, len(method_tuple)):
+        item = method_tuple[i]
+        # Some bindings pack args as a nested tuple-of-tuples.
+        if isinstance(item, tuple) and item and isinstance(item[0], tuple):
+            candidates.extend(item)
+        else:
+            candidates.append(item)
+
+    for arg_def in candidates:
+        if not (isinstance(arg_def, tuple) and len(arg_def) >= 3):
+            continue
+        flags = arg_def[0]
+        if not isinstance(flags, (list, tuple)):
+            continue
+
+        arg_type = "Variant"
+        type_obj = arg_def[1]
+        if hasattr(type_obj, "__name__"):
+            arg_type = type_obj.__name__
+        else:
+            arg_type = str(type_obj)
+
+        arg_name = "Unknown"
+        try:
+            arg_name = str(arg_def[2])
+        except (TypeError, ValueError):
+            pass
+
+        if "out" in flags or ("in" not in flags and "out" not in flags):
+            mechanism = "ByRef"
+        else:
+            mechanism = "ByVal"
+
+        args_info.append({
+            "name": arg_name,
+            "type": arg_type,
+            "mechanism": mechanism,
+            "is_optional": "opt" in flags,
+        })
+    return args_info
+
+
+def _clean_member_name(name: str) -> str:
+    """Strip comtypes' `_get_` / `_set_` / `_put_` decorators."""
+    for prefix in ("_get_", "_set_", "_put_"):
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+# ---------------------------------------------------------------- passes
+
+
+def _process_interfaces_and_enums(model: dict, mod, ref_name: str) -> None:
+    """Pass 1 — register every dispinterface as a class, every enum as an
+    enum, and promote the VBA library's globals."""
+    for attr_name in dir(mod):
+        try:
+            attr = getattr(mod, attr_name)
+        except (AttributeError, OSError):
+            continue
+
+        # Dispinterface / Interface
+        if isinstance(attr, type) and (
+            hasattr(attr, "_methods_") or hasattr(attr, "_disp_methods_")
+        ):
+            type_name = str(attr_name)
+            cls = model["classes"].setdefault(
+                type_name, {"type": "Class", "members": {}},
+            )
+            all_methods = list(getattr(attr, "_methods_", [])) + list(
+                getattr(attr, "_disp_methods_", [])
+            )
+            for m in all_methods:
+                if len(m) < 3:
+                    continue
+                raw_name = (
+                    m[2] if isinstance(m[2], str) else
+                    (m[2][0] if isinstance(m[2], tuple) and m[2] and isinstance(m[2][0], str) else None)
+                )
+                if not raw_name and len(m) >= 2 and isinstance(m[1], str):
+                    raw_name = m[1]
+                if not raw_name:
+                    continue
+
+                clean = _clean_member_name(str(raw_name))
+                args_info = _extract_member_args(m)
+                member = {"type": "Variant"}
+                if args_info:
+                    member["args"] = args_info
+                    member["min_args"] = sum(1 for a in args_info if not a["is_optional"])
+                    member["max_args"] = len(args_info)
+                cls["members"][clean] = member
+
+                # The VBA stdlib library registers as ref_name == "VBA";
+                # promote its members directly into the global scope.
+                if ref_name == "VBA" and not clean.startswith("_"):
+                    model["globals"].setdefault(clean, member)
+            continue
+
+        # Top-level integer constant (e.g. visNone)
+        if isinstance(attr, int) and not attr_name.startswith("_"):
+            model["globals"].setdefault(
+                attr_name, {"type": "Long", "kind": "Constant"},
+            )
+            continue
+
+        # Constants container — class with int attributes
+        if isinstance(attr, type):
+            enum_values: dict[str, int] = {}
+            for e_name in dir(attr):
+                if e_name.startswith("_"):
+                    continue
+                try:
+                    val = getattr(attr, e_name)
+                except (AttributeError, OSError):
+                    continue
+                if isinstance(val, int):
+                    enum_values[e_name] = val
+            if enum_values:
+                enum_name = str(attr_name)
+                bucket = model["enums"].setdefault(enum_name, {})
+                bucket.update(enum_values)
+                for e_k in enum_values:
+                    model["globals"].setdefault(
+                        e_k, {"type": "Long", "kind": "EnumItem"},
+                    )
+
+
+def _process_coclasses(model: dict, mod) -> None:
+    """Pass 2 — copy every CoClass's default-interface members onto the
+    CoClass entry (so `Set x As Workbook` resolves the same as the
+    underlying `IWorkbook` interface)."""
+    for attr_name in dir(mod):
+        try:
+            attr = getattr(mod, attr_name)
+        except (AttributeError, OSError):
+            continue
+
+        if not hasattr(attr, "_reg_clsid_"):
+            continue
+
+        coclass_name = str(attr_name)
+        target = model["classes"].setdefault(
+            coclass_name, {"type": "Class", "members": {}},
+        )
+
+        com_interfaces = getattr(attr, "_com_interfaces_", None)
+        if not com_interfaces:
+            continue
+        default_intf = com_interfaces[0]
+        intf_name = getattr(default_intf, "__name__", None)
+        if not intf_name or intf_name not in model["classes"]:
+            continue
+
+        src = model["classes"][intf_name]["members"]
+        target["members"].update(src)
+
+
+# ---------------------------------------------------------------- driver
+
+
+def generate_model(
+    references_path: Path,
+    output_path: Path,
+    *,
+    promote_application: bool = True,
+) -> dict[str, Any]:
+    """Drive both passes and return the resulting model dict."""
+    cc = _import_comtypes()
+
+    LOG.info("Loading references from %s", references_path)
+    with open(references_path, "r", encoding="utf-8") as fh:
+        ref_data = json.load(fh)
+
+    references = ref_data.get("references", [])
+    if not references:
+        sys.stderr.write(
+            "Error: vba_references.json contained no `references` array. "
+            "Did the VBA exporter complete successfully?\n"
+        )
+        sys.exit(2)
+
+    model: dict[str, Any] = {
         "globals": {},
         "classes": {},
         "enums": {},
-        "references": ref_data.get("references", [])
+        "references": references,
     }
 
-    # PASS 1: Process Interfaces and Enums
-    for ref in model["references"]:
-        name = ref.get("name", "Unknown")
-        guid = ref.get("guid")
-        major = ref.get("major")
-        minor = ref.get("minor")
-        path = ref.get("path", "")
-        
-        print(f"Processing Library (Pass 1 - Interfaces/Enums): {name}...")
-        
-        try:
-            mod = None
-            try:
-                mod = comtypes.client.GetModule((guid, major, minor))
-            except Exception as e:
-                if path and os.path.exists(path):
-                    mod = comtypes.client.GetModule(path)
-                else:
-                    print(f"  Error: Could not load {name}")
-                    continue
-            
-            if not mod: continue
+    for ref in references:
+        ref_name = ref.get("name", "Unknown")
+        LOG.info("Pass 1 — interfaces / enums: %s", ref_name)
+        mod = _load_module(cc, ref)
+        if mod is None:
+            LOG.warning("  could not load %s — skipped", ref_name)
+            continue
+        _process_interfaces_and_enums(model, mod, ref_name)
 
-            for attr_name in dir(mod):
-                try:
-                    attr = getattr(mod, attr_name)
-                    
-                    # 1. Interfaces / Dispatch Interfaces
-                    if isinstance(attr, type) and (hasattr(attr, '_methods_') or hasattr(attr, '_disp_methods_')):
-                        type_name = str(attr_name)
-                        if type_name not in model["classes"]:
-                            model["classes"][type_name] = { "type": "Class", "members": {} }
-                        
-                        methods_list = getattr(attr, '_methods_', [])
-                        disp_methods_list = getattr(attr, '_disp_methods_', [])
-                        all_methods = methods_list + disp_methods_list
-                        
-                        for m in all_methods:
-                            m_name = None
-                            # m structure often: (['propget'], 'Name', 'Name', ...) or (['id'], 'Func', 'Func', ...)
-                            # args usually in m[-1] or m[-2] if provided by comtypes
+    for ref in references:
+        ref_name = ref.get("name", "Unknown")
+        LOG.info("Pass 2 — coclasses: %s", ref_name)
+        mod = _load_module(cc, ref)
+        if mod is None:
+            continue
+        _process_coclasses(model, mod)
 
-                            if len(m) >= 3:
-                                candidate = m[2]
-                                if isinstance(candidate, str):
-                                    m_name = candidate
-                                elif isinstance(candidate, tuple) and len(candidate) > 0 and isinstance(candidate[0], str):
-                                    m_name = candidate[0]
-                            if not m_name and len(m) >= 2 and isinstance(m[1], str):
-                                m_name = m[1]
-                            
-                            if m_name:
-                                clean_name = str(m_name)
-                                if clean_name.startswith("_get_"): clean_name = clean_name[5:]
-                                elif clean_name.startswith("_set_"): clean_name = clean_name[5:]
-                                elif clean_name.startswith("_put_"): clean_name = clean_name[5:]
+    if promote_application:
+        _promote_application_globals(model)
 
-                                # Extract Arguments
-                                args_info = []
-                                try:
-                                    # Check if args are present in the tuple
-                                    # comtypes format: (['flags'], 'Return', 'Name', (['in', 'opt'], 'Type', 'ArgName'), ...)
-                                    # So indices starting from 3 might be args
-                                    if len(m) > 3:
-                                        potential_args = []
-                                        for i in range(3, len(m)):
-                                            item = m[i]
-                                            # Check for Packed Arguments (nested tuple)
-                                            # If item[0] is a tuple, it's likely a list of arguments packed together
-                                            if isinstance(item, tuple) and len(item) > 0 and isinstance(item[0], tuple):
-                                                potential_args.extend(item)
-                                            else:
-                                                potential_args.append(item)
+    LOG.info("Writing %s", output_path)
+    output_path.write_text(json.dumps(model, indent=2), encoding="utf-8")
+    LOG.info(
+        "Done — %d globals, %d classes, %d enums.",
+        len(model["globals"]), len(model["classes"]), len(model["enums"]),
+    )
+    return model
 
-                                        for arg_def in potential_args:
-                                            # Validate arg_def structure
-                                            if isinstance(arg_def, tuple) and len(arg_def) >= 3:
-                                                # (['in'], 'Type', 'ArgName')
-                                                flags = arg_def[0]
-                                                # Ensure flags is list/tuple
-                                                if not isinstance(flags, (list, tuple)):
-                                                    continue
 
-                                                a_type = "Variant"
-                                                try:
-                                                    a_type = str(arg_def[1])
-                                                    if hasattr(arg_def[1], '__name__'):
-                                                         a_type = arg_def[1].__name__
-                                                except:
-                                                    a_type = "Variant"
-
-                                                a_name = "Unknown"
-                                                try:
-                                                    a_name = str(arg_def[2])
-                                                except:
-                                                    pass
-
-                                                mechanism = 'ByVal'
-                                                if 'out' in flags: mechanism = 'ByRef'
-                                                if 'in' not in flags and 'out' not in flags: mechanism = 'ByRef'
-
-                                                is_optional = 'opt' in flags
-
-                                                args_info.append({
-                                                    "name": a_name,
-                                                    "type": a_type,
-                                                    "mechanism": mechanism,
-                                                    "is_optional": is_optional
-                                                })
-                                except Exception as e:
-                                    print(f"    Warning: Error extracting args for {clean_name}: {e}")
-                                    # Don't fail the member registration!
-
-                                member_def = {"type": "Variant"}
-                                if args_info:
-                                    member_def["args"] = args_info
-                                    member_def["min_args"] = len([a for a in args_info if not a['is_optional']])
-                                    member_def["max_args"] = len(args_info)
-                                    
-                                model["classes"][type_name]["members"][clean_name] = member_def
-
-                                # Global Promotion
-                                if name == "VBA" and not clean_name.startswith("_"):
-                                    model["globals"][clean_name] = member_def
-                    
-                    # 2. Enums and Constants Containers
-                    
-                    # Heuristic A: Top-level standard Integer Constants (e.g. visNone)
-                    if isinstance(attr, int):
-                         if attr_name not in model["globals"] and not attr_name.startswith("_"):
-                             model["globals"][attr_name] = {"type": "Long", "kind": "Constant"}
-
-                    # Heuristic B: Classes/Modules containing constants
-                    # Heuristic: any class/module with integer attributes is a potential source of constants
-                    elif isinstance(attr, type):
-                        enum_values = {}
-                        for e_name in dir(attr):
-                            if e_name.startswith("_"): continue
-                            try:
-                                val = getattr(attr, e_name)
-                                if isinstance(val, int):
-                                    enum_values[e_name] = val
-                            except: pass
-                        
-                        if enum_values:
-                            enum_name = str(attr_name)
-                            # Only treat as purely Enum if it has no methods (existing logic),
-                            # OR if it seems to be a dedicated constants container (like many VBA modules)
-                            
-                            # Merge into model["enums"]
-                            if enum_name not in model["enums"]:
-                                model["enums"][enum_name] = enum_values
-                            else:
-                                model["enums"][enum_name].update(enum_values)
-                                
-                            # Promote to Globals (Critical for Visio/VBA constants)
-                            for e_k in enum_values.keys():
-                                if e_k not in model["globals"]:
-                                    model["globals"][e_k] = {"type": "Long", "kind": "EnumItem"}
-
-                except Exception:
-                     pass
-        except Exception:
-             pass
-
-    # PASS 2: Process CoClasses (Map to Interfaces)
-    for ref in model["references"]:
-        name = ref.get("name", "Unknown")
-        guid = ref.get("guid")
-        major = ref.get("major")
-        minor = ref.get("minor")
-        path = ref.get("path", "")
-
-        print(f"Processing Library (Pass 2 - CoClasses): {name}...")
-        try:
-             # Fast reload/access
-            mod = None
-            try: mod = comtypes.client.GetModule((guid, major, minor))
-            except: 
-                if path and os.path.exists(path): mod = comtypes.client.GetModule(path)
-            
-            if not mod: continue
-
-            for attr_name in dir(mod):
-                try:
-                    attr = getattr(mod, attr_name)
-                     # Check for CoClass
-                    if hasattr(attr, '_reg_clsid_'):
-                         coclass_name = str(attr_name)
-                         if coclass_name not in model["classes"]:
-                             model["classes"][coclass_name] = { "type": "Class", "members": {} }
-                         
-                         # Find default interface
-                         if hasattr(attr, '_com_interfaces_') and len(attr._com_interfaces_) > 0:
-                             default_intf = attr._com_interfaces_[0]
-                             intf_name = default_intf.__name__ # e.g. IVShape
-                             
-                             # Copy members
-                             if intf_name in model["classes"]:
-                                 src_members = model["classes"][intf_name]["members"]
-                                 print(f"    Copying {len(src_members)} members from {intf_name} to {coclass_name}")
-                                 for m_k, m_v in src_members.items():
-                                     model["classes"][coclass_name]["members"][m_k] = m_v
-                             else:
-                                 print(f"    Warning: Interface {intf_name} not found for CoClass {coclass_name}")
-                         else:
-                             print(f"    Warning: No default interface found for CoClass {coclass_name}")
-                                     
-                except Exception as ex:
-                    print(f"    Error processing CoClass {attr_name}: {ex}")
-        except Exception:
-            pass
-
-    # Add standard globals
-    model["globals"]["Visio"] = {"type": "IVApplication"}
-
-    # Hardcoded Standard VBA Globals (Fallback)
-    standard_globals = [
-        "InStr", "Left", "Right", "Mid", "Len", "LenB", "LTrim", "RTrim", "Trim", 
-        "UCase", "LCase", "Space", "String", "Format", "Replace", "Split", "Join",
-        "MsgBox", "InputBox", "Shell", "DoEvents", "CreateObject", "GetObject",
-        "CurDir", "Dir", "MkDir", "RmDir", "ChDir", "ChDrive", "Kill", "FileCopy", "Name", "FileLen", "GetAttr", "SetAttr",
-        "FileDateTime", "FreeFile", "Open", "Close", "Print", "Write", "Input", "Line", "Loc", "LOF", "Seek", "EOF",
-        "Sin", "Cos", "Tan", "Atn", "Sqr", "Exp", "Log", "Abs", "Sgn", "Fix", "Int", 
-        "Rnd", "Randomize", "Timer", "Time", "Date", "Now", "Day", "Month", "Year", 
-        "Hour", "Minute", "Second", "DateSerial", "TimeSerial", "DateValue", "TimeValue", "DateAdd", "DateDiff", "DatePart",
-        "IsNumeric", "IsDate", "IsEmpty", "IsNull", "IsArray", "IsObject", "IsError", "IsMissing",
-        "CBool", "CByte", "CCur", "CDate", "CDbl", "CDec", "CInt", "CLng", "CLngLng", "CLngPtr", "CSng", "CStr", "CVar",
-        "CVErr", "Val", "Str", "Hex", "Oct", "RGB", "QBColor", "VarType", "TypeName", "IIf", "Switch", "Choose", "Partition",
-        "LBound", "UBound", "Array", "Filter", "Error", "Err",
-        "Chr", "ChrW", "Asc", "AscW", "Environ", "InStrRev", "StrComp", "Round"
+def _promote_application_globals(model: dict) -> None:
+    """Lift every member of the host's `Application` class into the
+    global scope (so `ActiveWindow`, `ActiveDocument`, … resolve without
+    qualification). Tries common host application interfaces."""
+    candidates = [
+        "Application", "_Application",
+        "IVApplication",      # Visio
+        "IAcadApplication",   # AutoCAD
     ]
+    for cls_name in candidates:
+        cls = model["classes"].get(cls_name)
+        if not cls:
+            continue
+        for m_name, m_def in cls["members"].items():
+            model["globals"].setdefault(m_name, m_def)
+        return  # only promote the first hit
 
 
-    for g in standard_globals:
-        if g not in model["globals"]:
-             model["globals"][g] = {"type": "Variant"}
-    
-    # Manual Fixes for Common VBA Constants
-    common_consts = ["vbCrLf", "vbNullString", "vbTrue", "vbFalse", "vbRed", "vbGreen", "vbBlue", 
-                     "vbBlack", "vbWhite", "vbInformation", "vbExclamation", "vbCritical", "vbYesNo", "vbYes", "vbNo", "vbOKOnly", 
-                     "vbObjectError", "vbNullChar", "vbModeless", "vbCr", "vbLf", "vbTab", "vbBack", "vbFormFeed", "vbVerticalTab",
-                     "vbNewLine", "vbDate", "vbBoolean", "vbByte", "vbCurrency", "vbDecimal", "vbDouble", "vbEmpty", "vbError", "vbInteger", "vbLong", "vbNull", "vbObject", "vbSingle", "vbString", "vbVariant",
-                     "visServiceVersion140"]
-    for c in common_consts:
-        model["globals"][c] = {"type": "Long"}
-        
-    # Manual Fixes for Visio Constants (that might be missed or tricky Enums)
-    visio_consts = ["visCustPropsAsk", "visCustPropsLangID", "visCustPropsCalendar", "visUserValue", "visUserPrompt", 
-                    "visCenterViewDefault", "visSectionHyperlink", "visSectionUser", "visTagDefault", 
-                    "visTagCnnctPt", "visTagCnnctPtABCD", "visTagCnnctNamed", "visTagCnnctNamedABCD",
-                    "visSectionProp", "visCustPropsLabel", "visCustPropsPrompt", "visCustPropsType", 
-                    "visCustPropsFormat", "visCustPropsValue", "visCustPropsSortKey", "visCustPropsInvis"]
-    for c in visio_consts:
-        model["globals"][c] = {"type": "Long"}
-
-    # Promote IVApplication members to Global Scope (e.g. ActiveWindow, ActiveDocument)
-    if "IVApplication" in model["classes"]:
-        app_members = model["classes"]["IVApplication"]["members"]
-        print(f"Promoting {len(app_members)} Application members to Global scope...")
-        for m_name, m_def in app_members.items():
-             if m_name not in model["globals"]:
-                 model["globals"][m_name] = m_def
-    
-    # Ensure UserForm has Show/Hide and standard properties
-    if "UserForm" in model["classes"]:
-        uf_members = model["classes"]["UserForm"]["members"]
-        common_uf_members = {
-            "Show": "Sub", "Hide": "Sub", "Controls": "Object", 
-            "Width": "Double", "Height": "Double", "Top": "Double", "Left": "Double",
-            "ScrollHeight": "Double", "ScrollWidth": "Double",
-            "InsideHeight": "Double", "InsideWidth": "Double"
-        }
-        for m, t in common_uf_members.items():
-             if m not in uf_members:
-                 uf_members[m] = {"type": t}
-
-    # Manual Fixes for Excel constants used in repo
-    xl_consts = ["xlValidateDecimal", "xlBetween", "xlUp", "xlToLeft"]
-    for c in xl_consts:
-        model["globals"][c] = {"type": "Long"}
-    
-    # Alias ThisDocument to Document (or IVShape for some items, but Document is best for top level)
-    if "Document" in model["classes"]:
-        model["globals"]["ThisDocument"] = {"type": "Document"}
-    elif "IVDocument" in model["classes"]:
-        model["globals"]["ThisDocument"] = {"type": "IVDocument"}
-
-    # Help Document/IVDocument with missing but critical properties
-    for doc_cls in ["Document", "IVDocument"]:
-        if doc_cls in model["classes"]:
-            doc_members = model["classes"][doc_cls]["members"]
-            missing_doc = {"Path": "String", "VBProject": "Object", "CustomUI": "String", "Fullname": "String", "Name": "String"}
-            for m, t in missing_doc.items():
-                if m not in doc_members:
-                    doc_members[m] = {"type": t}
-
-    # Fix MSForms Controls (they often need IControl members)
-    if "IControl" in model["classes"]:
-        control_members = model["classes"]["IControl"]["members"]
-        for cls in ["CommandButton", "TextBox", "Label", "ListBox", "ComboBox", "CheckBox", "OptionButton", "Frame", "Image"]:
-            if cls in model["classes"]:
-                for m_name, m_def in control_members.items():
-                        model["classes"][cls]["members"][m_name] = m_def
-
-    # Refine Collection Item Types (Selection.Item -> Shape, not Variant)
-    collection_fixes = {
-        "IVSelection": {"Item": "Shape", "Item16": "Shape", "PrimaryItem": "Shape"},
-        "Selection": {"Item": "Shape", "Item16": "Shape", "PrimaryItem": "Shape"},
-        "IVShapes": {"Item": "Shape"},
-        "Shapes": {"Item": "Shape"},
-        "IVMasters": {"Item": "Master"},
-        "Masters": {"Item": "Master"},
-        "IVPages": {"Item": "Page"},
-        "Pages": {"Item": "Page"},
-        "IVDocuments": {"Item": "Document"},
-        "Documents": {"Item": "Document"},
-        "IVLayers": {"Item": "Layer"},
-        "Layers": {"Item": "Layer"},
-        "IVWindows": {"Item": "Window"},
-        "Windows": {"Item": "Window"}
-    }
-    for cls_name, updates in collection_fixes.items():
-        if cls_name in model["classes"]:
-            for mem, new_type in updates.items():
-                 if mem in model["classes"][cls_name]["members"]:
-                      model["classes"][cls_name]["members"][mem]["type"] = new_type
+def _build_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="generate_model.py",
+        description=(
+            "Generate a VBAlidator JSON object model from the COM type "
+            "libraries listed in vba_references.json."
+        ),
+    )
+    p.add_argument(
+        "references",
+        nargs="?",
+        default="vba_references.json",
+        help="Path to the vba_references.json produced by VBA_Model_Exporter.bas. "
+             "Defaults to ./vba_references.json or ./tools/vba_references.json.",
+    )
+    p.add_argument(
+        "-o", "--output",
+        default="vba_model.json",
+        help="Where to write the resulting model (default: vba_model.json).",
+    )
+    p.add_argument(
+        "--no-app-promote",
+        action="store_true",
+        help="Do not lift Application members into global scope. Use this "
+             "when you intend to qualify every host call (e.g. "
+             "`Application.ActiveDocument`).",
+    )
+    p.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Verbose logging (per-library progress).",
+    )
+    return p
 
 
-    output_file = "vba_model.json"
-    print(f"Saving model to {output_file}...")
-    try:
-        with open(output_file, 'w') as f:
-            json.dump(model, f, indent=2)
-        print("Done.")
-    except Exception as e:
-        print(f"Error saving JSON: {e}")
+def _resolve_references_arg(arg: str) -> Path:
+    p = Path(arg)
+    if p.is_file():
+        return p
+    # Fall back to a couple of conventional locations.
+    for c in (
+        Path("vba_references.json"),
+        Path("tools") / "vba_references.json",
+        Path("..") / "vba_references.json",
+    ):
+        if c.is_file():
+            return c.resolve()
+    sys.stderr.write(
+        f"Error: could not find {arg!r} (or vba_references.json in the "
+        "usual spots). Run VBA_Model_Exporter.bas first.\n"
+    )
+    sys.exit(2)
+
+
+def main() -> None:
+    args = _build_argparser().parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(message)s",
+    )
+    refs = _resolve_references_arg(args.references)
+    out = Path(args.output)
+    generate_model(refs, out, promote_application=not args.no_app_promote)
+
 
 if __name__ == "__main__":
-    generate_model()
+    main()

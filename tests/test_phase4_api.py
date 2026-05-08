@@ -303,3 +303,136 @@ def test_host_model_json_loads(host):
     )
     assert isinstance(data.get("globals", {}), dict)
     assert isinstance(data.get("classes", {}), dict)
+
+
+# ---- vba_model.json auto-load -------------------------------------------
+
+
+def _write_minimal_model(path):
+    """Write a tiny custom model defining a class+global that nothing
+    else in the std/host catalogues knows about — so we can prove the
+    auto-load path actually merged it."""
+    import json
+    path.write_text(json.dumps({
+        "globals": {
+            "MyCustomGlobal": {"type": "Long", "kind": "Constant"},
+        },
+        "classes": {
+            "MyAddinClass": {
+                "members": {"DoStuff": {"type": "Sub"}},
+            },
+        },
+    }))
+
+
+def test_vba_model_json_auto_load_from_input_dir(tmp_path):
+    """Drop a `vba_model.json` next to the input folder and verify the
+    documented auto-load behaviour wires it through to the analyser."""
+    workdir = tmp_path / "myproject"
+    workdir.mkdir()
+    (workdir / "M.bas").write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim x As Long\n"
+        "    x = MyCustomGlobal\n"
+        "End Sub\n"
+    )
+    _write_minimal_model(workdir / "vba_model.json")
+
+    result = precheck(workdir)
+    assert all(
+        "MyCustomGlobal" not in e.get("message", "") for e in result.errors
+    ), (
+        "Auto-loaded vba_model.json must register MyCustomGlobal. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_vba_model_json_auto_load_from_cwd(tmp_path, monkeypatch):
+    """Auto-load also picks up a `vba_model.json` from the CWD even
+    when the input lives in a different folder."""
+    code_dir = tmp_path / "code"
+    code_dir.mkdir()
+    bas = code_dir / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim x As Long\n"
+        "    x = MyCustomGlobal\n"
+        "End Sub\n"
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    _write_minimal_model(cwd / "vba_model.json")
+    monkeypatch.chdir(cwd)
+
+    result = precheck(bas)
+    assert all(
+        "MyCustomGlobal" not in e.get("message", "") for e in result.errors
+    ), (
+        "CWD-level vba_model.json must be auto-loaded. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_vba_model_json_explicit_model_path_wins(tmp_path):
+    """Explicit `model_path=` overrides any auto-load candidate so
+    callers can pin a specific model from a CI config."""
+    workdir = tmp_path / "code"
+    workdir.mkdir()
+    (workdir / "M.bas").write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim x As Long\n"
+        "    x = OnlyInExplicitModel\n"
+        "End Sub\n"
+    )
+
+    # The auto-load candidate registers a *different* global so we can
+    # tell which one actually got loaded.
+    _write_minimal_model(workdir / "vba_model.json")
+
+    explicit = tmp_path / "explicit.json"
+    import json as _json
+    explicit.write_text(_json.dumps({
+        "globals": {"OnlyInExplicitModel": {"type": "Long"}}
+    }))
+
+    result = precheck(workdir, model_path=explicit)
+    # The explicit model knows OnlyInExplicitModel.
+    assert all(
+        "OnlyInExplicitModel" not in e.get("message", "") for e in result.errors
+    )
+
+
+def test_inline_source_does_not_trigger_auto_load(tmp_path, monkeypatch):
+    """For inline source strings there is no input directory — we must
+    not accidentally promote any nearby `vba_model.json`."""
+    monkeypatch.chdir(tmp_path)
+    _write_minimal_model(tmp_path / "vba_model.json")
+    result = precheck_source(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S(): End Sub\n",
+    )
+    # `precheck_source` is the inline path — it must be hermetic.
+    assert result.compile_safe
+    # The custom-model global must NOT have been registered (sanity:
+    # `precheck_source` doesn't take a path-like argument so the
+    # auto-load heuristic shouldn't fire).
+    # Touching MyCustomGlobal would resolve only if it was loaded.
+    inline_with_use = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim x As Long\n"
+        "    x = MyCustomGlobal\n"
+        "End Sub\n"
+    )
+    result2 = precheck_source(inline_with_use)
+    assert any(
+        "MyCustomGlobal" in e.get("message", "") for e in result2.errors
+    ), "precheck_source must not auto-load nearby vba_model.json"

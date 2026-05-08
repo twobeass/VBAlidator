@@ -100,6 +100,44 @@ def _iter_input_files(source: str | os.PathLike, inline_name: str = "<inline>") 
     return [(inline_name, str(source))], 1
 
 
+def _is_path_like(source) -> bool:
+    """Cheap pre-check that mirrors `_iter_input_files`'s heuristic
+    without re-reading the file. Returns True when `source` looks like a
+    filesystem path that exists; False for inline source strings.
+    """
+    if isinstance(source, os.PathLike):
+        return True
+    if not isinstance(source, str):
+        return False
+    if "\n" in source:
+        return False
+    try:
+        return os.path.isfile(source) or os.path.isdir(source)
+    except (TypeError, ValueError, OSError):
+        return False
+
+
+def _autodetect_vba_model(source) -> Path | None:
+    """Look for a `vba_model.json` next to the input and in the CWD.
+
+    Search order (first hit wins):
+    1. `<input_dir>/vba_model.json` when `source` is a directory.
+    2. `<input_file_dir>/vba_model.json` when `source` is a file.
+    3. `./vba_model.json` (current working directory).
+    """
+    candidates: list[Path] = []
+    src_path = Path(str(source))
+    if src_path.is_dir():
+        candidates.append(src_path / "vba_model.json")
+    elif src_path.is_file():
+        candidates.append(src_path.parent / "vba_model.json")
+    candidates.append(Path.cwd() / "vba_model.json")
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
 def _load_host_model(config: Config, host: str | None) -> bool:
     """Load `models/<host>.json` if it exists. Return True if loaded.
     Silent no-op when host is None or the file does not exist (the user
@@ -155,6 +193,13 @@ def precheck(
         _load_host_model(config, host)
     if model_path:
         config.load_model(str(model_path))
+    elif _is_path_like(source):
+        # Auto-load `vba_model.json` if present next to the input or in
+        # the current working directory. Keeps the documented "drop a
+        # vba_model.json next to your code" UX from Phase 0–3.
+        auto = _autodetect_vba_model(source)
+        if auto is not None:
+            config.load_model(str(auto))
 
     files, n_files = _iter_input_files(source)
     analyzer = Analyzer(config)

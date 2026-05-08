@@ -84,17 +84,47 @@ names so qualified accesses like `Visio.Application` resolve.
 
 ### Generating a model from COM
 
-The bundled `tools/VBA_Model_Exporter.bas` walks the host's
-`References` collection and dumps `vba_model.json` with the matching
-schema. Open the VBE in your target host (Visio, AutoCAD, …), import
-the macro, and run `ExportModel`.
+Two-step workflow:
 
-```bash
-vbalidator ./MyAddin --host excel --model ./vba_model.json
-```
+1. **In your host VBE** — import `tools/VBA_Model_Exporter.bas` into
+   any Office host (Excel, Word, Access, PowerPoint, Outlook, Visio,
+   AutoCAD, …) and run `ExportReferences`. It walks
+   `Application.VBE.ActiveVBProject.References` and writes a
+   `vba_references.json` next to the open document. Requires
+   "Trust access to the VBA project object model" in the Trust Center.
 
-`std_model.json` and `--host` always merge first; `--model` is layered
-on top and may override individual entries.
+2. **On your dev machine (Windows + comtypes)**:
+
+   ```bash
+   pip install comtypes
+   python tools/generate_model.py path/to/vba_references.json -o vba_model.json
+   ```
+
+   The script introspects every type library, captures classes / enums /
+   constants, copies CoClass default-interface members, and lifts the
+   first-found Application interface into the global scope. Use
+   `--no-app-promote` to skip the global lift.
+
+3. **Pass it to VBAlidator** — either explicitly:
+
+   ```bash
+   vbalidator ./MyAddin --host excel --model ./vba_model.json
+   ```
+
+   …or implicitly: drop the file as `vba_model.json` next to the input
+   folder (or in your CWD) and VBAlidator picks it up automatically.
+
+   ```bash
+   vbalidator ./MyAddin --host excel    # auto-loads ./vba_model.json
+   ```
+
+`std_model.json` and `--host` always merge first; `--model` (or the
+auto-detected `vba_model.json`) is layered on top and may override
+individual entries.
+
+A reference Visio export ships at
+[`examples/vba_references.example.json`](https://github.com/twobeass/VBAlidator/blob/main/examples/vba_references.example.json) — feed it through
+`generate_model.py` to see what a custom model looks like end-to-end.
 
 ## Built-in heuristics
 
