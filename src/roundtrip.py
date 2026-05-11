@@ -191,12 +191,89 @@ def verify_compile(
 
     # win32com is the more reliable backend. We only fall back to comtypes
     # when win32com isn't present.
-    issues: list[dict] = []
     if _ENV.win32com is not None:
-        issues = _verify_with_win32com(text, comp_name, kind, cfg, host, keep_workbook, timeout_s)
-    else:
-        issues = _verify_with_comtypes(text, comp_name, kind, cfg, host, keep_workbook, timeout_s)
-    return issues
+        return _run_with_timeout(
+            _verify_with_win32com,
+            (text, comp_name, kind, cfg, host, keep_workbook, timeout_s),
+            timeout_s=timeout_s,
+            host=host,
+        )
+    return _verify_with_comtypes(text, comp_name, kind, cfg, host, keep_workbook, timeout_s)
+
+
+def _run_with_timeout(fn, args, *, timeout_s, host):
+    """Run `fn(*args)` in a daemon worker thread; enforce `timeout_s`
+    in the parent. If the worker hangs (e.g. VBE blocks on an invisible
+    Compile-Error dialog behind `app.Visible=False`), kill the Office
+    host process so the parent stays responsive and returns a clear
+    `VBA_RT002` issue.
+
+    pywin32 doesn't honour COM-call timeouts itself — this is the only
+    way to avoid minute-long stalls in CI.
+    """
+    import threading
+
+    result: list = []
+    error: list[BaseException] = []
+
+    def _worker():
+        try:
+            result.append(fn(*args))
+        except BaseException as exc:  # noqa: BLE001 — re-raised below
+            error.append(exc)
+
+    t = threading.Thread(target=_worker, name="vbalidator-roundtrip", daemon=True)
+    t.start()
+    t.join(timeout_s)
+
+    if t.is_alive():
+        # Timeout. The worker is stuck inside a COM call we can't
+        # interrupt — kill the Office host so it stops blocking, then
+        # report the inconclusive run.
+        _kill_office_processes(host)
+        # Best-effort wait for the worker to unwind now that COM has
+        # been torn down underneath it.
+        t.join(5.0)
+        return [_make_inconclusive_issue(
+            f"round-trip exceeded {timeout_s:g}s budget for {host}; "
+            f"Office process killed to free the parent. The static "
+            f"analysis result remains the authoritative answer."
+        )]
+
+    if error:
+        raise error[0]
+    return result[0] if result else []
+
+
+def _kill_office_processes(host):
+    """Force-kill the Office host process tree on Windows. Best-effort —
+    failures are swallowed because the worst case (zombie Excel.exe) is
+    still an improvement over a hanging parent."""
+    import shutil
+    import subprocess as _sp
+
+    targets = {
+        "excel": ["EXCEL.EXE"],
+        "word": ["WINWORD.EXE"],
+        "access": ["MSACCESS.EXE"],
+        "outlook": ["OUTLOOK.EXE"],
+    }.get(host, [])
+    taskkill = shutil.which("taskkill")
+    if not taskkill:
+        return
+    for image in targets:
+        try:
+            _sp.run(
+                [taskkill, "/F", "/T", "/IM", image],
+                stdout=_sp.DEVNULL,
+                stderr=_sp.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, _sp.TimeoutExpired):
+            # `taskkill` not on PATH (non-Windows), or it timed out
+            # itself — nothing we can do, the parent moves on.
+            pass
 
 
 def _safe_module_name(stem: str) -> str:
@@ -204,6 +281,57 @@ def _safe_module_name(stem: str) -> str:
     if not out or not out[0].isalpha():
         out = "M_" + out
     return out[:31] or "InjectedModule"
+
+
+def _strip_export_directives(text: str) -> str:
+    """Strip the `.bas` / `.cls` / `.frm` export-only header block.
+
+    Files exported from the VBE carry directives that are only legal at
+    *file-import* time, not in the module body:
+
+        VERSION 1.0 CLASS
+        BEGIN
+          MultiUse = -1  'True
+        END
+        Attribute VB_Name = "MyModule"
+        Attribute VB_GlobalNameSpace = False
+        Sub Foo()
+            …
+        End Sub
+
+    Pasting the whole text through `CodeModule.AddFromString()` causes
+    VBE to refuse the module ("Attribute-Anweisungen müssen vor allen
+    Prozeduren stehen" / "Attributes must precede procedure body").
+    The right thing is to skip every leading line that is part of the
+    header block and pass only the actual code to the module.
+    """
+    lines = text.splitlines(keepends=True)
+    body: list[str] = []
+    in_header = True
+    in_begin_block = False  # the `BEGIN ... END` form attribute block
+    for line in lines:
+        stripped = line.strip()
+        if in_header:
+            if in_begin_block:
+                if stripped.upper() == "END":
+                    in_begin_block = False
+                # discard everything inside BEGIN…END
+                continue
+            if stripped.upper().startswith("VERSION "):
+                continue
+            if stripped.upper() == "BEGIN":
+                in_begin_block = True
+                continue
+            if stripped.startswith("Attribute "):
+                continue
+            if not stripped:
+                # Skip blank padding above the first real code line so
+                # the resulting module isn't prefixed by spurious blank
+                # rows. Once we've seen real code we keep blanks.
+                continue
+            in_header = False  # first non-directive content
+        body.append(line)
+    return "".join(body)
 
 
 # ---- Compile-trigger strategies --------------------------------------
@@ -254,11 +382,16 @@ def _attempt_compile(vbproj, app, wb, host, comp_name):
     if probe is not None:
         return probe
 
-    # Strategy 3 — confess.
-    return [_make_unavailable_issue(
-        f"round-trip compile could not be triggered on {host}; the "
-        f"static analysis result above remains the authoritative answer. "
-        f"See TODO.md §A2 — round-trip verification is in progress."
+    # Strategy 3 — confess. Use the *inconclusive* issue (RT002, warning)
+    # not the unavailable one (RT000, info): on this host VBE was reachable,
+    # we just couldn't trigger a compile via any of the supported call
+    # routes. The user asked for verification — surfacing that we couldn't
+    # deliver is the honest answer.
+    return [_make_inconclusive_issue(
+        f"round-trip compile could not be triggered on {host}; tried "
+        f"VBProject.Compile() (Strategy 1) and probe-Sub via "
+        f"Application.Run (Strategy 2). The static analysis result "
+        f"above remains the authoritative answer. See TODO.md §A2."
     )]
 
 
@@ -357,6 +490,23 @@ def _try_probe_compile(vbproj, app, wb, host, comp_name):
                 "kompilierungsfehler",
                 "syntax error",
                 "syntaxfehler",
+                # The Attribute-block fence error VBE throws when the
+                # injected source still carries the `Attribute VB_Name`
+                # header (now handled by `_strip_export_directives`, but
+                # belt-and-braces in case a user passes raw content).
+                "attribute-anweisungen müssen vor allen prozeduren stehen",
+                "attribute statements must precede",
+                "attributes must precede procedure body",
+                # Generic VBE compile-failure phrases.
+                "expected: identifier",
+                "expected end of statement",
+                "expected: end of statement",
+                "user-defined type not defined",
+                "benutzerdefinierter typ nicht definiert",
+                "sub or function not defined",
+                "sub oder function nicht definiert",
+                "variable not defined",
+                "variable nicht definiert",
             )
             if any(sentinel in low for sentinel in sentinels):
                 return [{
@@ -463,7 +613,9 @@ def _verify_with_win32com(
 
         comp = vbproj.VBComponents.Add(kind)
         comp.Name = comp_name
-        comp.CodeModule.AddFromString(text)
+        # Strip the `.bas` export header before injecting — Attribute /
+        # VERSION / BEGIN-END are only legal at file-import time.
+        comp.CodeModule.AddFromString(_strip_export_directives(text))
 
         # Drive the actual VBA compiler. See `_attempt_compile` for the
         # tiered strategy and why the bare `vbproj.Compile()` call is
@@ -514,12 +666,32 @@ def _verify_with_comtypes(
 
 
 def _make_unavailable_issue(reason: str) -> dict:
+    """The runtime can't even *attempt* a round-trip (Linux, missing
+    pywin32, Office not installed, …). Severity `info`, rule
+    `VBA_RT000` — callers can safely ignore."""
     return {
         "file": "<roundtrip>",
         "line": 0,
         "rule_id": "VBA_RT000",
         "severity": "info",
         "message": f"Round-trip verification skipped: {reason}",
+        "category": "roundtrip",
+    }
+
+
+def _make_inconclusive_issue(reason: str) -> dict:
+    """The runtime *tried* a round-trip but couldn't reach a verdict
+    (every compile-trigger strategy failed, or the host hung past the
+    timeout). Distinct from `VBA_RT000` (unavailable) so callers can
+    tell the two states apart — pinned to severity `warning` because
+    the user asked for a verification and we couldn't deliver one.
+    Rule `VBA_RT002`."""
+    return {
+        "file": "<roundtrip>",
+        "line": 0,
+        "rule_id": "VBA_RT002",
+        "severity": "warning",
+        "message": f"Round-trip verification attempted but inconclusive: {reason}",
         "category": "roundtrip",
     }
 

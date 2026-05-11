@@ -28,26 +28,41 @@ These cannot run on the Linux GitHub-hosted runners.
 
 - [~] **Run the VBE round-trip suite end-to-end at least once.**
   `src/roundtrip.py` is implemented in a tiered strategy
-  (`_try_direct_compile` → `_try_probe_compile` → `_make_unavailable_issue`)
-  with 8 unit tests in `tests/test_phase4_5_6.py` covering the
-  Linux-reachable paths. A first Windows + Excel run by an external
-  UAT runner (2026-05-11) caught the original Class-A bug — bare
-  `vbproj.Compile()` raises `AttributeError: <unknown>.Compile` on
-  modern Office because the method is hidden in the type library.
-  Fixed in `<commit-sha>`. **Still open:** verify on a real Office
-  install that Strategy 2 (probe Sub via `Application.Run`) actually
-  forces a compile and surfaces real errors as `VBA_RT001` on the
-  `tests/demo/` fixtures. Steps:
+  (`_try_direct_compile` → `_try_probe_compile` → `_make_inconclusive_issue`)
+  with 16 unit tests in `tests/test_phase4_5_6.py` covering the
+  Linux-reachable paths. UAT runs #8–#9 (2026-05-11) caught three
+  Class-A bugs in the Windows path:
+    - bare `vbproj.Compile()` raises `AttributeError: <unknown>.Compile`
+      on modern Office (method hidden in type library) — fixed in
+      `e1258b6`.
+    - the injected `.bas` text included the export-only `Attribute
+      VB_Name = "…"` header, which VBE rejects inside a module body —
+      fixed in this commit via `_strip_export_directives()`.
+    - `verify_compile(..., timeout_s=30)` was advertised as a timeout
+      but never enforced; an invisible VBE compile-error dialog could
+      hang the parent process for minutes. Fixed in this commit via
+      `_run_with_timeout()` (daemon-thread worker + Office-process
+      `taskkill /F` on overrun).
+  `VBA_RT002` (warning) was introduced as a distinct rule_id from
+  `VBA_RT000` (info, platform missing) so callers can tell whether VBE
+  was reachable at all.
+
+  **Still open:** verify on a real Office install that Strategy 2
+  (probe Sub via `Application.Run`) actually forces a compile and
+  surfaces real errors as `VBA_RT001` on the `tests/demo/` fixtures.
+  Steps:
     1. Install Office on a Windows machine and `pip install pywin32`.
     2. Enable Office Trust Center → Macro Settings → "Trust access to
        the VBA project object model".
     3. `vbalidator tests/samples/valid_code/valid_sample.bas --host excel --roundtrip --quiet`
-       — expect score=100, compile_safe=True, **zero** VBA_RT001.
+       — expect score=100, compile_safe=True, **zero** VBA_RT001 and
+       **zero** VBA_RT002. The header strip + clean compile should
+       produce an empty issue list.
     4. `vbalidator tests/demo --host excel --roundtrip --quiet`
        — expect at least one VBA_RT001 from BadModule.bas /
-       BadClass.cls. If only VBA_RT000 fires, neither Strategy 1 nor 2
-       worked on this Office build and we need Strategy 3 (VBE.CommandBars
-       menu invocation) as a follow-up.
+       BadClass.cls. If VBA_RT002 fires instead, neither Strategy 1 nor
+       2 worked on this Office build and we need Strategy 3
+       (VBE.CommandBars menu invocation) as a follow-up.
 
 - [ ] **Self-hosted Windows runner for `roundtrip.yml`.**
   The workflow already exists and is wired up; it currently no-ops on

@@ -76,6 +76,63 @@ _RULES: list[Rule] = [
         fix_hint="Use m/d/y, yyyy-mm-dd, d-mmm-y, or 'MMMM d, y' format with valid date components.",
     ),
 
+    # -- Round-trip verification (Phase 4.5) -------------------------
+    Rule(
+        rule_id="VBA_RT000",
+        title="Round-trip verification unavailable",
+        severity="info",
+        category="roundtrip",
+        phase="4.5",
+        description=(
+            "The runtime could not even attempt a VBE round-trip — usually "
+            "because we're not on Windows, pywin32 is missing, or Office "
+            "is not installed. Static analysis remains the authoritative "
+            "result; this is informational only."
+        ),
+        fix_hint=(
+            "Install Microsoft Office and `pip install pywin32` to enable "
+            "round-trip verification, or simply drop `--roundtrip` from "
+            "the invocation."
+        ),
+    ),
+    Rule(
+        rule_id="VBA_RT001",
+        title="VBE round-trip compile error",
+        severity="compile_verified",
+        category="roundtrip",
+        phase="4.5",
+        description=(
+            "The actual VBE compiler refused the source. This is the "
+            "strongest possible verdict — a real Office host has rejected "
+            "the code, so the static analyser's pass / fail call is "
+            "confirmed dynamically."
+        ),
+        fix_hint=(
+            "Open the source in the VBE manually to see the full error "
+            "message; the round-trip report includes the VBE description."
+        ),
+    ),
+    Rule(
+        rule_id="VBA_RT002",
+        title="Round-trip verification inconclusive",
+        severity="warning",
+        category="roundtrip",
+        phase="4.5",
+        description=(
+            "The runtime tried to drive the VBE compiler but no trigger "
+            "succeeded — `VBProject.Compile()` is hidden on modern Office, "
+            "and the probe-Sub via `Application.Run` either timed out or "
+            "failed with an unrecognised description. Distinct from "
+            "`VBA_RT000`: VBE *was* reachable, we just couldn't reach a "
+            "verdict."
+        ),
+        fix_hint=(
+            "See TODO.md §A2 for the open work on Strategy 3 (VBE menu-bar "
+            "invocation). In the meantime: rely on the static analyser, "
+            "which remains the authoritative answer."
+        ),
+    ),
+
     # -- Legacy analyzer findings ------------------------------------
     Rule(
         rule_id="VBA001",

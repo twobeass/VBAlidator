@@ -268,10 +268,12 @@ def test_attempt_compile_real_compile_error_yields_vba_rt001():
     assert "Expected" in i["message"]
 
 
-def test_attempt_compile_hidden_method_falls_through_to_info():
-    """Strategy 1 raises AttributeError (the bug we just fixed).
-    Without an app/wb to run Strategy 2, we land on the info notice —
-    crucially NOT a false-positive VBA_RT001."""
+def test_attempt_compile_hidden_method_falls_through_to_inconclusive():
+    """Strategy 1 raises AttributeError (Compile is hidden on modern
+    Office). With Strategy 2 also unavailable (no app/wb attached),
+    we land on `VBA_RT002` inconclusive — crucially NOT a false-positive
+    VBA_RT001, AND distinct from VBA_RT000 (platform-missing) because
+    VBE *was* reachable here; we just couldn't drive a compile."""
     from src.roundtrip import _attempt_compile
     vbproj = _FakeVBProject("attribute_error")
     # Pass app=None so Strategy 2's VBComponents.Add call fails and we
@@ -279,11 +281,12 @@ def test_attempt_compile_hidden_method_falls_through_to_info():
     issues = _attempt_compile(vbproj, app=None, wb=None, host="excel", comp_name="M")
     assert len(issues) == 1
     i = issues[0]
-    assert i["rule_id"] == "VBA_RT000", (
-        "AttributeError on Compile must NOT become a false VBA_RT001. "
+    assert i["rule_id"] == "VBA_RT002", (
+        "AttributeError on Compile must NOT become a false VBA_RT001, "
+        "and must be distinct from VBA_RT000 (platform-missing). "
         f"Got: {i!r}"
     )
-    assert i["severity"] == "info"
+    assert i["severity"] == "warning"
 
 
 def test_attempt_compile_strategy1_swallows_method_not_found_text():
@@ -346,3 +349,153 @@ def test_format_macro_ref_word_omits_workbook():
 
     ref = _format_macro_ref("word", _Doc(), "Mod1", "Probe")
     assert ref == "Mod1.Probe"  # Word doesn't prefix the document name
+
+
+# ---- Class-A fixes: Attribute strip + Inconclusive vs Unavailable -----
+
+
+def test_strip_export_directives_removes_attribute_header():
+    """The classic `.bas` export header MUST be stripped before
+    injection — VBE rejects Attribute statements inside a module body."""
+    from src.roundtrip import _strip_export_directives
+    raw = (
+        'Attribute VB_Name = "ValidCode"\n'
+        "Sub TestValid()\n"
+        "    Dim i As Integer\n"
+        "End Sub\n"
+    )
+    out = _strip_export_directives(raw)
+    assert "Attribute " not in out, f"Attribute survived: {out!r}"
+    assert "VB_Name" not in out
+    assert "Sub TestValid()" in out, f"Body lost: {out!r}"
+    assert out.startswith("Sub"), (
+        "Leading blank lines should be eaten so the resulting module "
+        "isn't prefixed by spurious blanks."
+    )
+
+
+def test_strip_export_directives_removes_class_begin_block():
+    """`.cls` files use the BEGIN…END attribute block — strip it too."""
+    from src.roundtrip import _strip_export_directives
+    raw = (
+        "VERSION 1.0 CLASS\n"
+        "BEGIN\n"
+        "  MultiUse = -1  'True\n"
+        "END\n"
+        'Attribute VB_Name = "MyClass"\n'
+        "Attribute VB_GlobalNameSpace = False\n"
+        "Option Explicit\n"
+        "\n"
+        "Public Sub Greet()\n"
+        "    Debug.Print \"hi\"\n"
+        "End Sub\n"
+    )
+    out = _strip_export_directives(raw)
+    assert "VERSION " not in out
+    assert "BEGIN" not in out
+    assert "MultiUse" not in out
+    assert "Attribute " not in out
+    assert out.startswith("Option Explicit"), out
+
+
+def test_strip_export_directives_preserves_blanks_inside_body():
+    """Blank lines *after* the header start are part of the code and
+    must be kept — only header padding is collapsed."""
+    from src.roundtrip import _strip_export_directives
+    raw = (
+        'Attribute VB_Name = "M"\n'
+        "\n"
+        "Sub First()\n"
+        "End Sub\n"
+        "\n"
+        "Sub Second()\n"
+        "End Sub\n"
+    )
+    out = _strip_export_directives(raw)
+    # The blank between First and Second stays.
+    assert out.count("\n\n") >= 1
+    assert "Sub First" in out and "Sub Second" in out
+
+
+def test_strip_export_directives_idempotent_on_clean_input():
+    """Stripping code without a header must return it unchanged."""
+    from src.roundtrip import _strip_export_directives
+    clean = "Sub S()\n    Debug.Print 1\nEnd Sub\n"
+    assert _strip_export_directives(clean) == clean
+
+
+def test_inconclusive_issue_distinct_from_unavailable():
+    """`VBA_RT000` (unavailable) and `VBA_RT002` (inconclusive) must
+    have different rule_ids and severities so callers can tell whether
+    VBE was reachable at all."""
+    from src.roundtrip import _make_inconclusive_issue, _make_unavailable_issue
+    u = _make_unavailable_issue("no pywin32")
+    i = _make_inconclusive_issue("all strategies failed")
+    assert u["rule_id"] == "VBA_RT000"
+    assert u["severity"] == "info"
+    assert i["rule_id"] == "VBA_RT002"
+    assert i["severity"] == "warning"
+    # Distinct categories or messages — but both flagged as roundtrip.
+    assert u["category"] == i["category"] == "roundtrip"
+
+
+def test_attempt_compile_falls_through_to_inconclusive_not_unavailable():
+    """Critical regression: when both Strategy 1 and Strategy 2 fail
+    (the case the UAT runner hit), we must emit `VBA_RT002`, not
+    `VBA_RT000`. The previous build emitted RT000 which is wrong on a
+    Windows host that *has* VBE."""
+    from src.roundtrip import _attempt_compile
+
+    class _Fake:
+        def __init__(self):
+            self.Compile = self._compile
+            self.VBComponents = self  # for `vbproj.VBComponents.Add`
+
+        def _compile(self):
+            raise AttributeError("<unknown>.Compile")
+
+        def Add(self, _kind):
+            raise RuntimeError("VBComponents.Add refused (simulated)")
+
+    issues = _attempt_compile(_Fake(), app=None, wb=None, host="excel", comp_name="M")
+    assert len(issues) == 1
+    assert issues[0]["rule_id"] == "VBA_RT002", issues[0]
+    assert issues[0]["severity"] == "warning"
+
+
+def test_run_with_timeout_returns_function_result_when_fast():
+    """The timeout wrapper must be a no-op when the worker completes
+    within the budget."""
+    from src.roundtrip import _run_with_timeout
+    result = _run_with_timeout(lambda: [{"ok": True}], (), timeout_s=5, host="excel")
+    assert result == [{"ok": True}]
+
+
+def test_run_with_timeout_emits_inconclusive_on_overrun():
+    """When the worker blocks past `timeout_s`, we must surface a
+    `VBA_RT002` inconclusive issue rather than hanging the parent.
+    Office-kill is best-effort (taskkill missing on Linux) — that's
+    OK, the parent still returns."""
+    from src.roundtrip import _run_with_timeout
+    import time
+
+    def _slow():
+        time.sleep(10)
+        return []
+
+    out = _run_with_timeout(_slow, (), timeout_s=0.2, host="excel")
+    assert len(out) == 1
+    assert out[0]["rule_id"] == "VBA_RT002"
+    assert "exceeded" in out[0]["message"].lower()
+
+
+def test_run_with_timeout_propagates_worker_exception():
+    """If the worker raises within the budget, that exception must
+    propagate — we don't want to silently swallow real bugs."""
+    from src.roundtrip import _run_with_timeout
+
+    def _boom():
+        raise RuntimeError("real bug")
+
+    with pytest.raises(RuntimeError, match="real bug"):
+        _run_with_timeout(_boom, (), timeout_s=5, host="excel")
