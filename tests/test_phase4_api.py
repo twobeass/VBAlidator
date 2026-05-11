@@ -436,3 +436,69 @@ def test_inline_source_does_not_trigger_auto_load(tmp_path, monkeypatch):
     assert any(
         "MyCustomGlobal" in e.get("message", "") for e in result2.errors
     ), "precheck_source must not auto-load nearby vba_model.json"
+
+
+# ---- CLI surface (UAT §0, §2) -------------------------------------------
+
+
+def test_version_flag_prints_package_version():
+    """`vbalidator --version` must exit 0 and print `vbalidator <version>`
+    so UAT §0 can pin the installed build."""
+    import subprocess
+    import sys
+    out = subprocess.run(
+        [sys.executable, "-m", "src.main", "--version"],
+        capture_output=True, text=True, check=False,
+    )
+    assert out.returncode == 0, (out.returncode, out.stderr)
+    assert "vbalidator" in out.stdout.lower()
+    from src import __version__
+    assert __version__ in out.stdout
+
+
+def test_quiet_flag_suppresses_stdout_on_clean_input(tmp_path):
+    """UAT §2 row 1: `vbalidator --quiet --no-strict <clean>` exits 0 and
+    writes the JSON report — stdout is silent so CI tools that pipe
+    stdout don't get banner noise."""
+    import subprocess
+    import sys
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S(): End Sub\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "report.json"
+    out = subprocess.run(
+        [sys.executable, "-m", "src.main", str(bas),
+         "--quiet", "--no-strict", "--output", str(report)],
+        capture_output=True, text=True, check=False,
+    )
+    assert out.returncode == 0, (out.returncode, out.stdout, out.stderr)
+    # --quiet means stdout is empty (or only colorama reset codes).
+    visible = "".join(ch for ch in out.stdout if ch.isprintable() and ch != ' ')
+    assert visible == "", f"--quiet must silence stdout. Got: {out.stdout!r}"
+    # JSON report still produced.
+    import json
+    d = json.loads(report.read_text(encoding="utf-8"))
+    assert d["version"] == "2.0"
+    assert d["summary"]["score"] == 100
+    assert d["summary"]["compile_safe"] is True
+
+
+def test_pipeline_errors_route_to_stderr_under_quiet(tmp_path):
+    """Hard errors (invalid input path) must reach stderr even with
+    --quiet, so CI logs surface real failures."""
+    import subprocess
+    import sys
+    out = subprocess.run(
+        [sys.executable, "-m", "src.main", "/nonexistent/path",
+         "--quiet", "--output", str(tmp_path / "x.json")],
+        capture_output=True, text=True, check=False,
+    )
+    assert out.returncode == 2, out.returncode
+    # Error message lands on stderr, NOT stdout (which would corrupt
+    # CI pipes).
+    assert out.stdout == "", f"stdout should be empty: {out.stdout!r}"
+    assert "does not exist" in out.stderr.lower()

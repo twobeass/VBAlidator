@@ -2,8 +2,10 @@ import argparse
 import json
 import os
 import sys
-from colorama import init, Fore, Style
 
+from colorama import Fore, Style, init
+
+from . import __version__
 from .api import precheck
 
 init(autoreset=True)
@@ -26,9 +28,23 @@ def _color_for_score(score):
     return Fore.RED
 
 
+def _emit(quiet, *args, **kwargs):
+    """Print to stdout only when `--quiet` is off. Errors should use the
+    standard `print(..., file=sys.stderr)` instead so they survive
+    `--quiet`."""
+    if not quiet:
+        print(*args, **kwargs)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="VBAlidator — VBA static analyser & compile-safety prechecker"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"vbalidator {__version__}",
+        help="Print the package version and exit.",
     )
     parser.add_argument(
         "input_path",
@@ -78,7 +94,10 @@ def main():
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Suppress per-issue console output. Only print summary + score.",
+        help="Suppress all non-essential stdout (banner, per-issue list, "
+             "summary). Errors continue to be written to stderr and the "
+             "exit code is unaffected. The JSON report is still written "
+             "to --output.",
     )
     parser.add_argument(
         "--roundtrip",
@@ -93,7 +112,11 @@ def main():
     args = parser.parse_args()
 
     if not os.path.exists(args.input_path):
-        print(Fore.RED + f"Error: input path '{args.input_path}' does not exist.")
+        # Hard errors always go to stderr; --quiet must not hide them.
+        print(
+            Fore.RED + f"Error: input path '{args.input_path}' does not exist.",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     defines = {}
@@ -109,7 +132,7 @@ def main():
                 else:
                     defines[k.strip().upper()] = v.strip()
 
-    print(Fore.CYAN + f"VBAlidator: scanning {args.input_path}"
+    _emit(args.quiet, Fore.CYAN + f"VBAlidator: scanning {args.input_path}"
           + (f" (host={args.host})" if args.host else ""))
 
     try:
@@ -122,12 +145,12 @@ def main():
             roundtrip=args.roundtrip,
         )
     except Exception as exc:  # surface unexpected pipeline failures
-        print(Fore.RED + f"Pipeline error: {exc}")
+        print(Fore.RED + f"Pipeline error: {exc}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(3)
 
-    # Console output
+    # Per-issue + summary console output (suppressed under --quiet).
     if not args.quiet:
         for issue in result.issues:
             sev_color = _color_for_severity(issue.get("severity", "error"))
@@ -138,24 +161,25 @@ def main():
                 f"{issue.get('message','')}"
             )
 
-    # Summary block
-    s = result.json()["summary"]
-    score_color = _color_for_score(result.score)
-    print()
-    print(f"{Fore.CYAN}Files scanned : {Style.RESET_ALL}{s['files_scanned']}")
-    print(f"{Fore.CYAN}Errors        : {Fore.RED}{s['errors']}")
-    print(f"{Fore.CYAN}Warnings      : {Fore.YELLOW}{s['warnings']}")
-    print(f"{Fore.CYAN}Info          : {Fore.WHITE}{s['info']}")
-    print(f"{Fore.CYAN}Confidence    : {score_color}{result.score} / 100"
-          f"  {'(compile-safe)' if result.compile_safe else '(needs fixes)'}")
+        s = result.json()["summary"]
+        score_color = _color_for_score(result.score)
+        print()
+        print(f"{Fore.CYAN}Files scanned : {Style.RESET_ALL}{s['files_scanned']}")
+        print(f"{Fore.CYAN}Errors        : {Fore.RED}{s['errors']}")
+        print(f"{Fore.CYAN}Warnings      : {Fore.YELLOW}{s['warnings']}")
+        print(f"{Fore.CYAN}Info          : {Fore.WHITE}{s['info']}")
+        print(f"{Fore.CYAN}Confidence    : {score_color}{result.score} / 100"
+              f"  {'(compile-safe)' if result.compile_safe else '(needs fixes)'}")
 
-    # JSON output
+    # JSON output is always written — the file is the primary product, the
+    # stdout summary is decorative. Failure to write the file is a hard
+    # error and goes to stderr.
     try:
         with open(args.output, "w", encoding="utf-8") as f:
             json.dump(result.json(), f, indent=2)
-        print(f"{Fore.CYAN}Report saved  : {Style.RESET_ALL}{args.output}")
+        _emit(args.quiet, f"{Fore.CYAN}Report saved  : {Style.RESET_ALL}{args.output}")
     except OSError as exc:
-        print(Fore.RED + f"Could not write report: {exc}")
+        print(Fore.RED + f"Could not write report: {exc}", file=sys.stderr)
         sys.exit(4)
 
     # Exit code: 0 only when score >= threshold and no errors.
