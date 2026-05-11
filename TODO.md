@@ -26,20 +26,28 @@ These cannot run on the Linux GitHub-hosted runners.
        you give it).
     5. Diff against the shipped models, verify, commit.
 
-- [ ] **Run the VBE round-trip suite end-to-end at least once.**
-  `src/roundtrip.py` is implemented and unit-tested (off-platform fallback
-  path), but nobody has yet driven it against a real VBE compiler. Steps:
+- [~] **Run the VBE round-trip suite end-to-end at least once.**
+  `src/roundtrip.py` is implemented in a tiered strategy
+  (`_try_direct_compile` → `_try_probe_compile` → `_make_unavailable_issue`)
+  with 8 unit tests in `tests/test_phase4_5_6.py` covering the
+  Linux-reachable paths. A first Windows + Excel run by an external
+  UAT runner (2026-05-11) caught the original Class-A bug — bare
+  `vbproj.Compile()` raises `AttributeError: <unknown>.Compile` on
+  modern Office because the method is hidden in the type library.
+  Fixed in `<commit-sha>`. **Still open:** verify on a real Office
+  install that Strategy 2 (probe Sub via `Application.Run`) actually
+  forces a compile and surfaces real errors as `VBA_RT001` on the
+  `tests/demo/` fixtures. Steps:
     1. Install Office on a Windows machine and `pip install pywin32`.
-    2. Enable Office Trust Center → Macro Settings → "Trust access to the
-       VBA project object model".
-    3. From a clone of this branch run
-       `vbalidator tests/samples/valid_code/valid_sample.bas --host excel --roundtrip --quiet`
-       and confirm the result is `score=100, compile_safe=True` with no
-       `VBA_RT001` issues (only the `VBA_RT000` info is acceptable, and
-       only if Trust Center is locked).
-    4. Repeat with `tests/demo` — the demo files contain known errors
-       and VBE itself should reject several modules; verify VBA_RT001
-       fires for at least the `BadModule.bas` / `BadClass.cls` ones.
+    2. Enable Office Trust Center → Macro Settings → "Trust access to
+       the VBA project object model".
+    3. `vbalidator tests/samples/valid_code/valid_sample.bas --host excel --roundtrip --quiet`
+       — expect score=100, compile_safe=True, **zero** VBA_RT001.
+    4. `vbalidator tests/demo --host excel --roundtrip --quiet`
+       — expect at least one VBA_RT001 from BadModule.bas /
+       BadClass.cls. If only VBA_RT000 fires, neither Strategy 1 nor 2
+       worked on this Office build and we need Strategy 3 (VBE.CommandBars
+       menu invocation) as a follow-up.
 
 - [ ] **Self-hosted Windows runner for `roundtrip.yml`.**
   The workflow already exists and is wired up; it currently no-ops on

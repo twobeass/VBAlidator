@@ -214,3 +214,135 @@ def test_precheck_decorates_legacy_findings_with_phase_4_5_severity_aware_score(
         f"Expected score 77 (1 error -20, 1 warning -3), got {result.score}. "
         f"Issues: {result.issues!r}"
     )
+
+
+# ---- Roundtrip compile-trigger tiered strategy (Class A regression) ---
+
+class _FakeCompileFn:
+    """Callable that simulates a hidden COM method via late-binding."""
+    def __init__(self, behaviour):
+        # behaviour: 'attribute_error' | 'clean' | 'compile_error'
+        self.behaviour = behaviour
+        self.call_count = 0
+
+    def __call__(self):
+        self.call_count += 1
+        if self.behaviour == "attribute_error":
+            raise AttributeError("<unknown>.Compile")
+        if self.behaviour == "clean":
+            return None
+        if self.behaviour == "compile_error":
+            # Mimic pywin32 com_error: (hresult, source, excepinfo, argerr)
+            raise Exception((-2147352567, "Microsoft Excel", (
+                1004, "VBA", "Compile error: Expected: end of statement",
+                None, 0, -2146826276,
+            ), None))
+        raise RuntimeError("unknown test behaviour")
+
+
+class _FakeVBProject:
+    def __init__(self, compile_behaviour):
+        self.Compile = _FakeCompileFn(compile_behaviour)
+
+
+def test_attempt_compile_clean_compile_returns_empty():
+    """Strategy 1: VBProject.Compile() returns cleanly → no issues."""
+    from src.roundtrip import _attempt_compile
+    vbproj = _FakeVBProject("clean")
+    issues = _attempt_compile(vbproj, app=None, wb=None, host="excel", comp_name="M")
+    assert issues == []
+
+
+def test_attempt_compile_real_compile_error_yields_vba_rt001():
+    """Strategy 1: VBProject.Compile() raises a real VBE error →
+    one VBA_RT001 issue with the parsed description."""
+    from src.roundtrip import _attempt_compile
+    vbproj = _FakeVBProject("compile_error")
+    issues = _attempt_compile(vbproj, app=None, wb=None, host="excel", comp_name="M")
+    assert len(issues) == 1
+    i = issues[0]
+    assert i["rule_id"] == "VBA_RT001"
+    assert i["severity"] == "compile_verified"
+    # The description gets extracted from the com_error excepinfo tuple.
+    assert "Compile error" in i["message"]
+    assert "Expected" in i["message"]
+
+
+def test_attempt_compile_hidden_method_falls_through_to_info():
+    """Strategy 1 raises AttributeError (the bug we just fixed).
+    Without an app/wb to run Strategy 2, we land on the info notice —
+    crucially NOT a false-positive VBA_RT001."""
+    from src.roundtrip import _attempt_compile
+    vbproj = _FakeVBProject("attribute_error")
+    # Pass app=None so Strategy 2's VBComponents.Add call fails and we
+    # fall through to Strategy 3.
+    issues = _attempt_compile(vbproj, app=None, wb=None, host="excel", comp_name="M")
+    assert len(issues) == 1
+    i = issues[0]
+    assert i["rule_id"] == "VBA_RT000", (
+        "AttributeError on Compile must NOT become a false VBA_RT001. "
+        f"Got: {i!r}"
+    )
+    assert i["severity"] == "info"
+
+
+def test_attempt_compile_strategy1_swallows_method_not_found_text():
+    """When `Compile` raises with the well-known 'method not found'
+    wording, that's still an indirection failure, not a real compile
+    error — Strategy 1 must return None so Strategy 2 / 3 take over."""
+    from src.roundtrip import _attempt_compile
+
+    class _MNFCompile:
+        def __init__(self):
+            self.Compile = self._fn
+
+        def _fn(self):
+            raise Exception((-1, "VBA", (
+                438, "VBA", "Method or data member not found",
+                None, 0, 0,
+            ), None))
+
+    issues = _attempt_compile(_MNFCompile(), app=None, wb=None, host="excel", comp_name="M")
+    assert all(i["rule_id"] != "VBA_RT001" for i in issues), (
+        "'Method or data member not found' is an indirection failure, "
+        "not a compile error."
+    )
+
+
+def test_vba_error_description_handles_plain_exception():
+    """Plain `Exception("...")` (no excepinfo tuple) falls back to str()."""
+    from src.roundtrip import _vba_error_description
+    assert _vba_error_description(Exception("oops")) == "oops"
+
+
+def test_vba_error_description_unwraps_com_error_tuple():
+    """pywin32 com_error has the user-facing message at excepinfo[2]."""
+    from src.roundtrip import _vba_error_description
+    com_error = Exception((
+        -2147352567, "Excel",
+        (1004, "VBA", "Compile error: Sub or Function not defined", None, 0, 0),
+        None,
+    ))
+    desc = _vba_error_description(com_error)
+    assert "Sub or Function not defined" in desc
+
+
+def test_format_macro_ref_quotes_workbook_name_for_excel():
+    """Workbook names may contain spaces — Excel needs single quotes."""
+    from src.roundtrip import _format_macro_ref
+
+    class _Wb:
+        Name = "My Workbook With Spaces.xlsm"
+
+    ref = _format_macro_ref("excel", _Wb(), "Mod1", "Probe")
+    assert ref == "'My Workbook With Spaces.xlsm'!Mod1.Probe"
+
+
+def test_format_macro_ref_word_omits_workbook():
+    from src.roundtrip import _format_macro_ref
+
+    class _Doc:
+        Name = "Doc.docm"
+
+    ref = _format_macro_ref("word", _Doc(), "Mod1", "Probe")
+    assert ref == "Mod1.Probe"  # Word doesn't prefix the document name

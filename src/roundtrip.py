@@ -206,6 +206,209 @@ def _safe_module_name(stem: str) -> str:
     return out[:31] or "InjectedModule"
 
 
+# ---- Compile-trigger strategies --------------------------------------
+
+# The obvious call — `vbproj.Compile()` — is *not* exposed through pywin32
+# late-binding on most Office builds (the type library hides the method
+# even though the IDE uses it internally). A raw call yields
+#   AttributeError: <unknown>.Compile
+# which the pre-`bd432b1` version of this file silently mistranslated
+# into a `VBA_RT001` compile_verified error on every input, clean or not.
+#
+# The tiered strategy below tries strictly *more reliable* approaches
+# until one of them gives a definitive answer:
+#
+# 1.  `VBProject.Compile()` — direct call. Works on a few legacy Office
+#     builds and on stand-alone VB6 projects. Returns AttributeError on
+#     modern Office where the method is hidden.
+#
+# 2.  Probe-Sub via `Application.Run`. VBA compiles the *entire* project
+#     before invoking any procedure, so a successful Run of an injected
+#     no-op Sub proves the project is compile-clean. A failing Run with
+#     a recognisable VBA error description gives us the actual compile
+#     error message.
+#
+# 3.  When neither works (e.g. `Run` blocked by macro security in the
+#     guest profile, or the project has a syntax error early enough to
+#     refuse component creation): emit a single `VBA_RT000` info issue
+#     stating that round-trip verification is unavailable on this host.
+#     Critically: NEVER emit a fake `VBA_RT001` — we promise the user
+#     that `compile_verified` means "VBE itself rejected this code".
+
+
+def _attempt_compile(vbproj, app, wb, host, comp_name):
+    """Tiered VBA-compile trigger.
+
+    Returns a list of issue dicts:
+    - empty list when the project is compile-clean
+    - `[VBA_RT001, ...]` when VBE found errors (severity `compile_verified`)
+    - `[VBA_RT000]` info when no technique could trigger a compile
+    """
+    # Strategy 1 — the documented (but hidden) Compile method.
+    direct = _try_direct_compile(vbproj, host)
+    if direct is not None:
+        return direct
+
+    # Strategy 2 — probe Sub via Application.Run.
+    probe = _try_probe_compile(vbproj, app, wb, host, comp_name)
+    if probe is not None:
+        return probe
+
+    # Strategy 3 — confess.
+    return [_make_unavailable_issue(
+        f"round-trip compile could not be triggered on {host}; the "
+        f"static analysis result above remains the authoritative answer. "
+        f"See TODO.md §A2 — round-trip verification is in progress."
+    )]
+
+
+def _try_direct_compile(vbproj, host):
+    """Strategy 1: call `VBProject.Compile` directly.
+
+    Returns `None` when the method is not exposed (so the caller tries
+    the next strategy), `[]` when the project compiles cleanly, or a
+    list with a single `VBA_RT001` when VBE returned a real error.
+    """
+    try:
+        compile_fn = getattr(vbproj, "Compile", None)
+    except Exception:
+        return None
+    if compile_fn is None:
+        return None
+    try:
+        compile_fn()
+    except AttributeError:
+        # pywin32 raises this when the type library doesn't expose
+        # `Compile` even though `getattr` returned a callable wrapper.
+        # The wrapper is itself a generic `<unknown>` IDispatch shim.
+        return None
+    except Exception as exc:
+        # Anything else is treated as a genuine VBE error — but only
+        # when the description is *not* the well-known
+        # "Methode/Eigenschaft im Projekttyp ungültig" / "Method or
+        # data member not found" message, which means the call route
+        # itself failed (i.e. still not a real compile error).
+        msg = _vba_error_description(exc).lower()
+        if any(
+            sentinel in msg
+            for sentinel in (
+                "method or data member not found",
+                "methode/eigenschaft im projekttyp ungültig",
+                "method or property not supported",
+            )
+        ):
+            return None
+        return [{
+            "file": "<roundtrip>", "line": 0,
+            "rule_id": "VBA_RT001", "severity": "compile_verified",
+            "category": "roundtrip",
+            "message": (
+                f"VBE compile error (round-trip, {host}): "
+                f"{_vba_error_description(exc)}"
+            ),
+        }]
+    return []  # clean compile
+
+
+def _try_probe_compile(vbproj, app, wb, host, comp_name):
+    """Strategy 2: inject a no-op Sub and invoke it via
+    `Application.Run`. VBA compiles the entire project before invoking
+    any procedure, so a successful Run proves a clean compile.
+
+    Returns `None` when the strategy isn't applicable (couldn't add the
+    probe module, Run blocked, …), `[]` on clean compile, or a list
+    with a `VBA_RT001` when Run failed in a way that looks like a
+    compile error.
+    """
+    import time
+
+    probe_module_name = f"VBAlidPr{int(time.time() * 1000) % 1_000_000:06d}"
+    probe_sub_name = "Probe"
+    probe_comp = None
+
+    try:
+        probe_comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    except Exception:
+        return None
+
+    try:
+        probe_comp.Name = probe_module_name
+        probe_comp.CodeModule.AddFromString(
+            f"Public Sub {probe_sub_name}()\nEnd Sub\n"
+        )
+        # Excel: 'WorkbookName.xlsm'!Module.Sub
+        # Word:  Document.Module.Sub  (no quotes / no extension)
+        # We try Excel-style first since it's the more common host.
+        macro_ref = _format_macro_ref(host, wb, probe_module_name, probe_sub_name)
+        try:
+            app.Run(macro_ref)
+        except Exception as exc:
+            description = _vba_error_description(exc)
+            low = description.lower()
+            # "Cannot run the macro …" / "Makro nicht verfügbar" usually
+            # means VBE refused because the project doesn't compile.
+            # "The macro may not be available …" is the English variant.
+            sentinels = (
+                "cannot run the macro",
+                "the macro may not be available",
+                "makro nicht verfügbar",
+                "kann nicht ausgeführt werden",
+                "compile error",
+                "kompilierungsfehler",
+                "syntax error",
+                "syntaxfehler",
+            )
+            if any(sentinel in low for sentinel in sentinels):
+                return [{
+                    "file": "<roundtrip>", "line": 0,
+                    "rule_id": "VBA_RT001", "severity": "compile_verified",
+                    "category": "roundtrip",
+                    "message": (
+                        f"VBE compile error (round-trip, {host}, via Run): "
+                        f"{description}"
+                    ),
+                }]
+            # Something else went wrong (security prompt, MAPI logon, …).
+            # Don't claim a compile error; fall through to Strategy 3.
+            return None
+        return []  # clean compile
+    finally:
+        if probe_comp is not None:
+            try:
+                vbproj.VBComponents.Remove(probe_comp)
+            except Exception:
+                # Probe-module removal can fail when Office is mid-shutdown
+                # or the project is read-only. The temp workbook is going
+                # away anyway, so this is purely cosmetic.
+                pass
+
+
+def _format_macro_ref(host, wb, module_name, sub_name):
+    """Build the `Application.Run` argument string for a probe sub."""
+    if host == "excel":
+        # Quotes around the workbook name handle spaces correctly.
+        return f"'{wb.Name}'!{module_name}.{sub_name}"
+    if host == "word":
+        # Word uses the document's project name (no extension).
+        return f"{module_name}.{sub_name}"
+    # Fallback — same form as Word.
+    return f"{module_name}.{sub_name}"
+
+
+def _vba_error_description(exc):
+    """Extract the human-readable description from a pywin32 com_error.
+
+    com_error.args == (hresult, source, excepinfo, argerr)
+    excepinfo      == (errnum, source, description, helpfile, helpcontext, errorid)
+    """
+    args = getattr(exc, "args", ())
+    if len(args) >= 3:
+        excepinfo = args[2]
+        if isinstance(excepinfo, tuple) and len(excepinfo) >= 3 and excepinfo[2]:
+            return str(excepinfo[2])
+    return str(exc)
+
+
 def _verify_with_win32com(
     text: str,
     comp_name: str,
@@ -262,18 +465,10 @@ def _verify_with_win32com(
         comp.Name = comp_name
         comp.CodeModule.AddFromString(text)
 
-        # Compile and capture errors.
-        try:
-            vbproj.Compile()  # raises if compile fails
-        except Exception as exc:
-            issues.append({
-                "file": comp_name,
-                "line": 0,
-                "rule_id": "VBA_RT001",
-                "severity": "compile_verified",
-                "message": f"VBE compile error (round-trip, {host}): {exc}",
-                "category": "roundtrip",
-            })
+        # Drive the actual VBA compiler. See `_attempt_compile` for the
+        # tiered strategy and why the bare `vbproj.Compile()` call is
+        # unreliable on most Office builds.
+        issues.extend(_attempt_compile(vbproj, app, wb, host, comp_name))
 
     finally:
         # All three teardown calls are deliberately best-effort. The
