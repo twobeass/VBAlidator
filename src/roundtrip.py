@@ -214,12 +214,18 @@ def _run_with_timeout(fn, args, *, timeout_s, host):
     import threading
 
     result: list = []
-    error: list[BaseException] = []
+    error: list[Exception] = []
 
     def _worker():
         try:
             result.append(fn(*args))
-        except BaseException as exc:  # noqa: BLE001 — re-raised below
+        except Exception as exc:
+            # We capture *all* normal exceptions so the main thread can
+            # re-raise them after `join`. We deliberately do NOT catch
+            # `BaseException` (KeyboardInterrupt / SystemExit): those
+            # are only delivered to the main thread anyway, so catching
+            # them here would suppress nothing useful and would mask
+            # genuine signal-driven termination.
             error.append(exc)
 
     t = threading.Thread(target=_worker, name="vbalidator-roundtrip", daemon=True)
