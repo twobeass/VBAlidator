@@ -49,6 +49,7 @@ nav:
   - User Guide:
       - Usage: Usage.md
       - Configuration: Configuration.md
+      - Host models comparison: host-models-comparison.md
       - Architecture: Architecture.md
   - Rule catalogue:
       - Overview: rules/index.md

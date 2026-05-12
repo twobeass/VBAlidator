@@ -13,18 +13,37 @@ Status legend: `[ ]` open · `[~]` partially done in the sandbox · `[x]` done.
 
 These cannot run on the Linux GitHub-hosted runners.
 
-- [ ] **Regenerate every bundled host model from a real Office install.**
+- [~] **Regenerate every bundled host model from a real Office install.**
   The `src/models/{excel,word,access,outlook}.json` files shipped today
   are hand-curated minimal subsets covering the ~80% common case
   (Application / Workbook / Worksheet / Range / Documents / Database /
-  NameSpace / MailItem). For full fidelity:
+  NameSpace / MailItem). UAT run #9 produced full-fidelity counterparts
+  on Windows + Office 365 (gist at
+  <https://gist.github.com/twobeass/6786ef3404922c3549d5621638be29e6>);
+  the FP comparison documented in `docs/host-models-comparison.md`
+  shows the regenerated models are **strictly better or equal** on every
+  Awesome-VBA project (best-Excel total 306 vs. shipped 351 = −12.8%).
+
+  **Decision (Plan C, opt-in full models):**
+    1. Ship a separate `vbalidator-models-full` sdist (~7 MB) that
+       drops the regenerated JSONs into `vbalidator.models.full`.
+    2. CLI gains `--host {excel,word,access,outlook,visio}-full`;
+       the standard hosts stay bundled and remain the default.
+    3. Documentation in `docs/full-models.md` (linked from
+       Configuration) explains the trade-off.
+
+  **Deferred to a follow-up PR** to keep the current branch focused on
+  round-trip pipeline fixes; the FP gate result is captured so the
+  next person picks up with data, not speculation.
+
+  For the **interim manual workflow** (still useful as the regen step
+  for the future opt-in package):
     1. Open Excel → VBE → File ▶ Import File → `tools/VBA_Model_Exporter.bas`.
     2. Run `ExportReferences`. It writes `vba_references.json` next to
        the workbook (or to `%TEMP%`).
-    3. On the same machine: `pip install comtypes` → `python tools/generate_model.py vba_references.json -o src/models/excel.json`.
-    4. Repeat for Word, Access, Outlook (the script writes to the path
-       you give it).
-    5. Diff against the shipped models, verify, commit.
+    3. On the same machine: `pip install comtypes` → `python tools/generate_model.py vba_references.json -o vba_model.json`.
+    4. `vbalidator … --model vba_model.json` (or drop the file next to
+       your code for auto-load).
 
 - [~] **Run the VBE round-trip suite end-to-end at least once.**
   `src/roundtrip.py` is implemented in a tiered strategy
