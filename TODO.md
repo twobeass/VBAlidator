@@ -173,20 +173,24 @@ These are one-time setup steps. After they are in place CI takes over.
 These are tracked in `docs/roadmap.md` already; restating here so the
 backlog is visible from the repo root.
 
-- [ ] **P2.6 — UDT / Class member-chain depth.**
-  Today member chains validate the first hop fully and degrade to
-  permissive Variant past the second `.`. Closing this requires a
-  proper type-system on the analyser walker. Estimated: 1 PR, +400/-50
-  in `src/analyzer.py` + ~10 fixtures.
+- [x] **P2.6 — UDT / Class member-chain depth.** *(shipped 54f7919)*
+  Member chains now resolve to arbitrary depth — through array indices,
+  function-call returns, and property-get returns. Root cause was two
+  parser bugs (`name() As T` parsed as `Variant()` because the array
+  suffix was checked after `As` instead of before, in both `parse_udt`
+  and `parse_declaration`). The Set/Let validator now also runs on
+  dotted LHS, gated by an explicit-typing requirement. New rule:
+  VBA260 (Member not found in type).
 
-- [ ] **P3.5 — Module-Level vs Procedure-Level Statement Placement.**
-  Reject `Type … End Type` inside a `Sub`, executable code at module
-  level, etc. Needs the parser to track the active container. Probably
-  ~250 LOC, 4–6 fixtures.
+- [x] **P3.5 — Module-Level vs Procedure-Level Statement Placement.** *(shipped 29f991b)*
+  Rejects `Type` / `Enum` / `Declare` / `Public Const` / `Option` /
+  `DefXxx` inside a procedure body (VBA360), and rejects executable
+  statements at module top level (VBA361). Parser skips the `.cls`
+  `VERSION … BEGIN … END` header so class modules don't false-positive.
 
-- [ ] **VBA350 — `End Sub` closing a Function.**
-  Easy rule, AI generators sometimes get this wrong. ~30 LOC + 1
-  fixture.
+- [x] **VBA350 — `End Sub` closing a Function.** *(shipped 687341c)*
+  `End Sub`/`End Function`/`End Property` terminator-mismatch detection
+  in `procedures_parse`; explicit fixture + direct tests.
 
 - [ ] **P5.10 — Auto-fix engine.**
   The `fix_hint` field on every `Rule` is the seed. Most useful first:
