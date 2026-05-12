@@ -454,44 +454,12 @@ _RULES: list[Rule] = [
         fix_hint="Use `&` for concatenation. `+` is bidirectional in VBA but can silently coerce — prefer `&` for strings.",
     ),
 
-    # -- Phase 2.6: deep member chain -------------------------------
-    Rule(
-        rule_id="VBA260",
-        title="Member not found in type",
-        severity="error",
-        category="member_access",
-        phase="2.6",
-        description=(
-            "After resolving a dotted member chain `a.b.c[(i)].d` the "
-            "analyser could not find the named member on the inferred "
-            "type at that hop. The chain walker preserves element "
-            "types through array indices, function-call returns, and "
-            "property-get returns of arbitrary depth, so this is a "
-            "genuine typo or missing declaration."
-        ),
-        fail_example=(
-            "Private Type Cell: val As Long: End Type\n"
-            "Private Type Row: cells() As Cell: End Type\n"
-            "Sub S()\n"
-            "    Dim r As Row\n"
-            "    Debug.Print r.cells(0).bogus    ' Cell has no `bogus`\n"
-            "End Sub"
-        ),
-        ok_example=(
-            "Private Type Cell: val As Long: End Type\n"
-            "Private Type Row: cells() As Cell: End Type\n"
-            "Sub S()\n"
-            "    Dim r As Row\n"
-            "    Debug.Print r.cells(0).val\n"
-            "End Sub"
-        ),
-        fix_hint=(
-            "Fix the spelling or add the member to the UDT / class. "
-            "If the parent type is an `Object` / `Variant` bag the "
-            "analyser deliberately skips this check — give the variable "
-            "a concrete declared type to opt back in."
-        ),
-    ),
+    # NOTE on Phase 2.6 — Deep member-chain typing landed but does NOT
+    # introduce a new rule ID. The existing VBA002 ("Member not found")
+    # diagnostic was already the right umbrella; P2.6 just made the
+    # chain walker accurate enough that VBA002 fires at the correct hop
+    # for arbitrarily deep chains (array index, function return, etc.).
+    # See `tests/test_phase26_member_chain.py` for coverage.
 
     # -- Phase 2.8: fixed-length string -----------------------------
     Rule(

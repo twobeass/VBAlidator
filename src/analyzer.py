@@ -1494,14 +1494,12 @@ class Analyzer:
                     current_module_name = next((m.name for m in self.modules if m.filename == filename), None)
                     member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name, current_module_name) or (None, None, None)
                     if not member_type:
-                        if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
+                        if not self._is_permissive_chain_type(last_resolved_type):
 
                             if report_errors:
                                 self.errors.append({
                                     "file": filename,
                                     "line": token.line,
-                                    "rule_id": "VBA260",
-                                    "severity": "error",
                                     "message": f"Member '{name}' not found in type '{last_resolved_type}' inside '{context}'."
                                 })
                     last_resolved_type = member_type or 'Unknown'
@@ -1874,6 +1872,59 @@ class Analyzer:
                                      "message": f"ByRef argument type mismatch. Parameter '{param_name}' expects '{param_type}', but got variable of type '{arg_type}'."
                                  })
 
+    # Names a member-chain hop must be silent about. Either intentionally
+    # permissive (Object / Variant) or carrying no resolvable member info
+    # (procedure-kind literals from host models that lack a `returns`
+    # field; qualified types whose owning library isn't loaded).
+    _PERMISSIVE_PRIMITIVES = {
+        'object', 'variant', 'unknown', 'control', 'form',
+        # Procedure-kind names that some host models emit as the type
+        # when the real return-type is unknown. Treating them as types
+        # would produce nonsense like "Member 'X' not found in type 'Sub'".
+        'sub', 'function', 'property', 'event',
+    }
+
+    def _is_permissive_chain_type(self, type_name):
+        """A chain hop on this type cannot produce a useful diagnostic.
+
+        Skips:
+          * primitive bag-types we never had information about (Object,
+            Variant, …),
+          * procedure-kind literals smuggled in as types when host
+            models lack a `returns` field (Sub / Function / Property),
+          * qualified types from libraries the analyser doesn't have
+            loaded (`ComctlLib.Node`, `MSForms.Control`, …) — i.e. the
+            namespace prefix isn't a known Project class / module and
+            isn't in the host model.
+        """
+        if not type_name:
+            return True
+        low = type_name.lower()
+        if low in self._PERMISSIVE_PRIMITIVES:
+            return True
+        # Array-type residual like "Cell()" — the `(...)` consume step
+        # should have stripped the suffix, so seeing it here means the
+        # caller is checking a type it can't navigate into.
+        if low.endswith('()'):
+            return True
+        if '.' in type_name:
+            prefix = type_name.split('.', 1)[0].lower()
+            # If the namespace prefix is neither a known project module
+            # nor a loaded reference / host class, we can't validate
+            # members on it.
+            known = False
+            if any(m.name.lower() == prefix for m in self.modules):
+                known = True
+            elif prefix in self.reference_names:
+                known = True
+            elif self.config.get_class(prefix):
+                known = True
+            elif prefix in (self.config.object_model.get("classes", {}) or {}):
+                known = True
+            if not known:
+                return True
+        return False
+
     def resolve_member(self, type_name, member_name, current_module_name=None):
         return self._resolve_member_internal(type_name, member_name, current_module_name)
 
@@ -1979,11 +2030,20 @@ class Analyzer:
             members = cls_def.get("members", {})
             for m_name, m_def in members.items():
                 if m_name.lower() == member_name.lower():
-                    t = m_def.get("type", "Variant")
-                    k = 'Expression'
-                    if t in ('Sub', 'Function', 'Property'):
-                        k = 'Procedure'
-                    return t, k, m_def
+                    raw_type = m_def.get("type", "Variant")
+                    # Host models commonly encode the *kind* in `type`
+                    # (Sub / Function / Property) and the actual return
+                    # type in `returns`. If only `type` is present and
+                    # it's a procedure-kind literal, the chain after
+                    # this hop is unknowable — return Variant so the
+                    # downstream walker treats the chain as permissive
+                    # instead of asking "Member 'X' not found in type
+                    # 'Function'".
+                    if raw_type in ('Sub', 'Function', 'Property', 'Event'):
+                        ret = m_def.get("returns")
+                        t = ret if ret else 'Variant'
+                        return t, 'Procedure', m_def
+                    return raw_type, 'Expression', m_def
 
         return None
 

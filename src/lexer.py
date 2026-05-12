@@ -192,6 +192,12 @@ class Lexer:
             # so PREPROCESSOR's `#[a-zA-Z_]\w*` would otherwise eat
             # `#January` from `#January 1, 2020#` and leave a stray `#`.
             ('DATELITERAL', r'\#[^#\r\n]+\#'),
+            # VBA file-number argument used by I/O statements:
+            #   Open path For Binary As #1
+            #   Print #1, "x" / Put #1, , buf / Close #1
+            # Numeric file-numbers start with `#<digit>+`; lexically
+            # absent variants (`#fileVar`) already match PREPROCESSOR.
+            ('FILENUMBER', r'#\d+'),
             ('PREPROCESSOR', r'#[a-zA-Z_]\w*'),
             # Numeric literals may carry a trailing legacy type-suffix:
             # & Long, % Integer, # Double, ! Single, @ Currency, $ String

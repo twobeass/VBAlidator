@@ -47,6 +47,27 @@ End Sub
     )
 
 
+def test_file_number_syntax_not_a_lexer_error(run_source):
+    """VBA's `#1` / `#2` file-number argument used by Open / Print / Put /
+    Close I/O statements must tokenize cleanly. Previously it fell through
+    to the MISMATCH path and produced VBA_LEX001 false positives.
+    """
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub WriteFile(path As String, body As String)
+    Open path For Binary As #1
+    Put #1, , body
+    Close #1
+End Sub
+"""
+    result = run_source(code)
+    lex_errs = [e for e in result.errors if e.get("rule_id") == "VBA_LEX001"]
+    assert not lex_errs, (
+        f"File-number `#N` must not trigger lexer errors. Got: {lex_errs!r}"
+    )
+
+
 def test_clean_source_has_no_lexer_errors(run_source):
     code = """
 Attribute VB_Name = "M"

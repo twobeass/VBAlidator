@@ -80,11 +80,9 @@ End Sub
 """
     result = run_source(code)
     assert any(
-        e.get("rule_id") == "VBA260"
-        and "bogus" in e.get("message", "")
-        and "Lvl4" in e.get("message", "")
-        for e in result.errors
-    ), f"Expected VBA260 on 'bogus' against 'Lvl4'. Errors: {result.errors!r}"
+        "bogus" in m and "Lvl4" in m and "not found" in m
+        for m in _err_messages(result)
+    ), f"Expected 'bogus' typo flagged against type 'Lvl4'. Errors: {result.errors!r}"
 
 
 def test_udt_array_member_preserves_element_type(run_source):
@@ -274,6 +272,89 @@ End Sub
         e.get("rule_id") == "VBA210" and "x.inner" in e.get("message", "")
         for e in result.errors
     ), f"Expected VBA210 on `Set x.inner = ...`. Errors: {result.errors!r}"
+
+
+def test_member_not_found_keeps_legacy_vba002_rule_id(run_source):
+    """UAT §2 minset requires VBA002 — the long-standing rule_id for
+    "member not found". P2.6 must not silently retag the diagnostic to a
+    different ID. The mapping flows through `reporting.normalize_issue`
+    via the legacy regex, so the analyser intentionally omits an explicit
+    rule_id on this message.
+    """
+    from src.reporting import normalize_issue
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+
+Private Type Inner: n As Long: End Type
+Private Type Outer: inner As Inner: End Type
+
+Sub S()
+    Dim x As Outer
+    Dim n As Long
+    n = x.inner.bogus
+End Sub
+"""
+    result = run_source(code)
+    raw = next(e for e in result.errors if "bogus" in e.get("message", ""))
+    normalized = normalize_issue(raw)
+    assert normalized["rule_id"] == "VBA002", (
+        f"Member-not-found must map to legacy VBA002, got {normalized!r}"
+    )
+
+
+def test_chain_does_not_misreport_procedure_kind_as_type(run_source):
+    """Host models often encode `{"type": "Function"}` on a class member
+    when the actual return type is unknown / Variant. The chain walker
+    must NOT propagate that literal as a type — otherwise we'd report
+    'Member X not found in type Function' on community code.
+    """
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+
+Sub S()
+    Dim c As Collection
+    Set c = New Collection
+    c.Item(1).Clone
+End Sub
+"""
+    result = run_source(code)
+    bad = [
+        e for e in result.errors
+        if "type 'Function'" in e.get("message", "")
+        or "type 'Sub'" in e.get("message", "")
+        or "type 'Property'" in e.get("message", "")
+    ]
+    assert not bad, (
+        f"Procedure-kind literals must not surface as type names. "
+        f"Got: {bad!r}"
+    )
+
+
+def test_chain_silent_on_unloaded_external_reference_namespace(run_source):
+    """`Dim x As ComctlLib.Node` where ComctlLib isn't loaded must not
+    spam member-not-found errors on every property access — we have no
+    metadata to validate against."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+
+Sub S()
+    Dim node As ComctlLib.Node
+    node.Key = "x"
+    node.Expanded = True
+End Sub
+"""
+    result = run_source(code)
+    bad = [
+        e for e in result.errors
+        if "ComctlLib.Node" in e.get("message", "")
+        and "not found" in e.get("message", "")
+    ]
+    assert not bad, (
+        f"Members of unloaded qualified types must not flag. Got: {bad!r}"
+    )
 
 
 def test_dotted_set_let_skipped_on_unresolvable_chain(run_source):
