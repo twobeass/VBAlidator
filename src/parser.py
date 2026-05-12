@@ -548,11 +548,32 @@ class VBAParser:
         # Parse Body Block
         end_marker = proc_type.split()[0].lower() # Sub, Function, Property
         proc.body = self.parse_block(end_markers=[f"End {end_marker}", "End"])
-        
-        # Ensure we consumed End Sub/Function
+
+        # Ensure we consumed End Sub/Function/Property. AI generators
+        # occasionally close a Function with `End Sub` (or vice versa);
+        # VBE rejects this at compile time. Surface it as VBA350 so the
+        # mismatch is caught before VBE ever sees it.
         if self.match('IDENTIFIER', 'End'):
+             end_line = self.current_token.line
              self.advance()
-             if self.current_token.value.lower() == end_marker:
+             actual = self.current_token.value.lower() if self.current_token.type == 'IDENTIFIER' else None
+             if actual == end_marker:
+                 self.advance()
+             elif actual in ('sub', 'function', 'property'):
+                 # Wrong terminator keyword (`End Sub` closing a Function
+                 # etc.). Consume it so recovery continues cleanly.
+                 self.errors.append({
+                     "file": self.filename,
+                     "line": end_line,
+                     "rule_id": "VBA350",
+                     "severity": "error",
+                     "message": (
+                         f"`End {self.current_token.value}` closes "
+                         f"{proc_type} '{proc_name}'. Use "
+                         f"`End {end_marker.capitalize()}` to match the "
+                         f"procedure kind."
+                     ),
+                 })
                  self.advance()
         self.consume_statement()
 

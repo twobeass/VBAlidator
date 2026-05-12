@@ -608,6 +608,32 @@ _RULES: list[Rule] = [
         ),
         fix_hint="Pass the matching number of arguments (respecting Optional / ParamArray).",
     ),
+
+    # -- Phase 3 (continued) — terminator mismatch -------------------
+    Rule(
+        rule_id="VBA350",
+        title="Procedure terminator does not match its kind",
+        severity="error",
+        category="syntax",
+        phase="3.5",
+        description=(
+            "`End Sub` closes a Sub, `End Function` closes a Function, "
+            "`End Property` closes a Property. Mixing them is a hard VBE "
+            "compile error and a common AI-generator slip after editing a "
+            "procedure's signature."
+        ),
+        fail_example=(
+            "Function F() As Long\n"
+            "    F = 1\n"
+            "End Sub\n"
+        ),
+        ok_example=(
+            "Function F() As Long\n"
+            "    F = 1\n"
+            "End Function\n"
+        ),
+        fix_hint="Use the End form that matches the procedure declaration.",
+    ),
 ]
 
 

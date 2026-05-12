@@ -34,6 +34,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "enum_uniqueness": ("enum",),
     "raise_event": ("raiseevent", "event"),
     "implements_iface": ("implements", "missing"),
+    "end_terminator": ("end ", "end_sub", "end_function", "closes"),
 }
 
 

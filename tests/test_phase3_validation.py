@@ -282,3 +282,55 @@ def test_currency_literal_lex():
     lex = Lexer(code)
     list(lex.tokenize())
     assert not lex.errors, f"Currency literal must lex cleanly. Errors: {lex.errors!r}"
+
+
+# ---- VBA350 — End Sub/Function/Property terminator mismatch -----------
+
+
+def test_end_sub_closing_function_flagged(run_source):
+    """A Function closed with `End Sub` (or vice versa) must surface
+    VBA350. VBE rejects this at compile time; common AI-generator slip
+    after refactoring a signature without updating the terminator."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Function ComputeValue() As Long\n"
+        "    ComputeValue = 42\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA350" for e in result.errors), (
+        f"`End Sub` closing a Function must produce VBA350. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_end_function_closing_sub_flagged(run_source):
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub DoStuff()\n"
+        "    Debug.Print 1\n"
+        "End Function\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA350" for e in result.errors), result.errors
+
+
+def test_matching_end_terminator_is_clean(run_source):
+    """Guard against over-detection: properly matched terminators must
+    not flag VBA350."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub A()\n"
+        "End Sub\n"
+        "Function B() As Long\n"
+        "    B = 1\n"
+        "End Function\n"
+        "Property Get C() As Long\n"
+        "    C = 1\n"
+        "End Property\n"
+    )
+    result = run_source(code)
+    assert all(e.get("rule_id") != "VBA350" for e in result.errors), result.errors
