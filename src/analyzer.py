@@ -1451,11 +1451,28 @@ class Analyzer:
                 # Check for Label Definition "Label:" or Named Argument "Arg:="
                 if i + 1 < len(tokens) and tokens[i+1].type == 'OPERATOR':
                     if tokens[i+1].value == ':':
-                        i += 2
-                        prev_keyword = None
-                        last_resolved_type = None
-                        last_resolved_kind = None
-                        continue
+                        # A `Label:` only exists at the START of a statement
+                        # (i == 0). In `Sub S(): Dim x: x = Foo: End Sub`
+                        # the parser hands us colon-separated statements
+                        # whose last tokens include a trailing `:` (the
+                        # statement separator). Treating every `IDENT :`
+                        # in the stream as a label-definition makes the
+                        # analyser skip identifier resolution of `Foo`,
+                        # which is the silent-failure UAT §3 caught.
+                        # Real label: only when i == 0 AND there are no
+                        # other tokens after the colon, OR the trailing
+                        # tokens are themselves just more colons.
+                        is_label_position = (i == 0)
+                        if is_label_position:
+                            i += 2
+                            prev_keyword = None
+                            last_resolved_type = None
+                            last_resolved_kind = None
+                            continue
+                        # Statement-separator colon — drop it and continue
+                        # resolving the previous identifier normally. We
+                        # do NOT advance past the colon yet; the next
+                        # iteration will handle it as an OPERATOR.
                     if tokens[i+1].value == ':=':
                         # Named Argument - skip it and the operator
                         i += 2
