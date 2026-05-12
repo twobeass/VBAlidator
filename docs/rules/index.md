@@ -31,6 +31,7 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA231`](VBA231.md) | 🔴 error | `const_expression` | 2.5 | `Const` initialiser references a non-constant |
 | [`VBA240`](VBA240.md) | 🔴 error | `operator_type` | 2.4 | Arithmetic operator between string and numeric literal |
 | [`VBA250`](VBA250.md) | 🔴 error | `declaration` | 2.8 | Fixed-length String at procedure level |
+| [`VBA260`](VBA260.md) | 🔴 error | `member_access` | 2.6 | Member not found in type |
 | [`VBA300`](VBA300.md) | 🔴 error | `platform` | 3.3 | `Declare` missing `PtrSafe` |
 | [`VBA310`](VBA310.md) | 🔴 error | `enum` | 3.4 | Duplicate Enum member name |
 | [`VBA320`](VBA320.md) | 🟡 warning | `style` | 3.6 | Module is missing `Option Explicit` |
@@ -46,4 +47,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*41 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*42 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

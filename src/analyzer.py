@@ -654,6 +654,11 @@ class Analyzer:
     def _resolve_lhs_type(self, lhs_tokens, scope):
         """Best-effort type resolution for the assignment LHS.
         Returns (type_name, kind) or (None, None).
+
+        P2.6 — walks the full dotted chain `a.b.c.d`. If any hop cannot
+        be resolved (member not in UDT/class, or parent type is a
+        permissive bag like `Object`/`Variant`), returns (None, None) so
+        downstream validators skip rather than mis-typing the LHS.
         """
         if not lhs_tokens:
             return None, None
@@ -663,33 +668,22 @@ class Analyzer:
         sym = scope.resolve(first.value)
         if not sym:
             return None, None
-        # Walk dotted member chain `a.b.c` for assignments to UDT/class members.
         type_name = sym.get("type")
         kind = sym.get("kind")
         i = 1
         while i + 1 < len(lhs_tokens) and lhs_tokens[i].type == 'OPERATOR' and lhs_tokens[i].value == '.':
             member_tok = lhs_tokens[i + 1]
             if member_tok.type != 'IDENTIFIER':
-                break
-            # Try class member resolution
-            cls = self.config.object_model.get("classes", {}).get((type_name or "").lower())
-            if cls and "members" in cls:
-                member_def = cls["members"].get(member_tok.value) or cls["members"].get(member_tok.value.lower())
-                if member_def:
-                    type_name = member_def.get("returns", member_def.get("type", "Variant"))
-                    kind = member_def.get("type", "Variable")
-                    i += 2
-                    continue
-            # UDT member
-            udt = self.udts.get((type_name or "").lower())
-            if udt:
-                hit = next((m for m in udt.members if m.name.lower() == member_tok.value.lower()), None)
-                if hit:
-                    type_name = hit.type_name
-                    kind = "Variable"
-                    i += 2
-                    continue
-            break
+                return None, None
+            # Bail out on permissive bag-types: the member's real type
+            # is unknowable from declaration alone.
+            if (type_name or "").lower() in ("object", "variant", "unknown", ""):
+                return None, None
+            resolved = self.resolve_member(type_name or "", member_tok.value)
+            if not resolved:
+                return None, None
+            type_name, kind, _extra = resolved
+            i += 2
         return type_name, kind
 
     def _validate_set_vs_let(self, tokens, scope, filename, context):
@@ -700,12 +694,22 @@ class Analyzer:
             return
         lhs, _eq, _rhs, has_set, has_let = parsed  # noqa: F841
 
-        # Only validate the most common AI-mistake form: bare-identifier LHS
-        # (`x = …` / `Set x = …`). Dotted chains and indexed targets need
-        # full member-chain typing which is Phase 2.6 work — skipping them
-        # here keeps false-positive rate low while still catching the
-        # vast majority of generator bugs.
-        if len(lhs) != 1 or lhs[0].type != 'IDENTIFIER':
+        # Bare identifier (`x = …`) is the common form. Dotted chains
+        # (`obj.member = …`) are now supported via _resolve_lhs_type after
+        # P2.6 — but indexed targets (`a(0) = …`) and bang-operator LHS
+        # still require expression-level evaluation we don't model, so
+        # skip those to avoid false positives.
+        if not lhs or lhs[0].type != 'IDENTIFIER':
+            return
+        is_bare = len(lhs) == 1
+        is_dotted_chain = (
+            not is_bare
+            and all(
+                (t.type == 'IDENTIFIER') or (t.type == 'OPERATOR' and t.value == '.')
+                for t in lhs
+            )
+        )
+        if not is_bare and not is_dotted_chain:
             return
 
         type_name, kind = self._resolve_lhs_type(lhs, scope)
@@ -719,6 +723,7 @@ class Analyzer:
             return
 
         line = lhs[0].line
+        display = "".join(t.value for t in lhs)
         is_scalar = self._is_clearly_scalar(type_name)
         is_object = self._is_clearly_object(type_name)
 
@@ -729,7 +734,7 @@ class Analyzer:
                 "rule_id": "VBA210",
                 "severity": "error",
                 "message": (
-                    f"`Set` used on non-object target '{lhs[0].value}' of type '{type_name}' "
+                    f"`Set` used on non-object target '{display}' of type '{type_name}' "
                     f"in '{context}'. Use `Let` or assignment without `Set`."
                 ),
             })
@@ -742,7 +747,7 @@ class Analyzer:
                 "rule_id": "VBA211",
                 "severity": "error",
                 "message": (
-                    f"Object assignment to '{lhs[0].value}' (type '{type_name}') "
+                    f"Object assignment to '{display}' (type '{type_name}') "
                     f"requires `Set` in '{context}'."
                 ),
             })
@@ -1489,13 +1494,14 @@ class Analyzer:
                     current_module_name = next((m.name for m in self.modules if m.filename == filename), None)
                     member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name, current_module_name) or (None, None, None)
                     if not member_type:
-                        # DEBUG
                         if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
 
                             if report_errors:
                                 self.errors.append({
                                     "file": filename,
                                     "line": token.line,
+                                    "rule_id": "VBA260",
+                                    "severity": "error",
                                     "message": f"Member '{name}' not found in type '{last_resolved_type}' inside '{context}'."
                                 })
                     last_resolved_type = member_type or 'Unknown'

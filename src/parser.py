@@ -546,25 +546,31 @@ class VBAParser:
         if self.match('IDENTIFIER', 'WithEvents'):
             self.advance()
 
-        # Dim x As Type
+        # Dim x [(dims)] As Type [= init]
         while True:
             if self.current_token.type == 'IDENTIFIER':
                 var_name = self.current_token.value
                 self.advance()
-                var_type = 'Variant'
-                
-                if self.match('IDENTIFIER', 'As'):
-                    self.advance()
-                    var_type = self.parse_type_signature()
-                
-                # Handle array: x(10)
+
+                # P2.6 — Array suffix `name(...)` precedes `As` in VBA.
+                # Parsing it first preserves the declared element type so
+                # `cells(0).val` resolves to the real member type instead
+                # of degrading to Variant.
+                is_array = False
                 if self.match('OPERATOR', '('):
+                    is_array = True
                     while self.current_token.type != 'EOF' and not self.match('OPERATOR', ')'):
                         self.advance()
                     self.consume('OPERATOR', ')')
-                    var_type += "()" 
 
-                # Handle initialization = ...
+                var_type = 'Variant'
+                if self.match('IDENTIFIER', 'As'):
+                    self.advance()
+                    var_type = self.parse_type_signature()
+
+                if is_array:
+                    var_type += "()"
+
                 if self.match('OPERATOR', '='):
                      while self.current_token.type not in ('NEWLINE', 'EOF') and not self.match('OPERATOR', ','):
                          self.advance()
@@ -1312,28 +1318,33 @@ class VBAParser:
                 self.consume_statement()
                 break
             
-            # Parse Member: Name As Type
+            # Parse Member: Name [(dims)] As Type [* length]
             if self.current_token.type == 'IDENTIFIER':
                 var_name = self.current_token.value
                 self.advance()
-                
+
+                # P2.6 — Array suffix `name(...)` comes BEFORE `As` in VBA,
+                # not after. Capturing it here lets the element type carry
+                # forward into deep member-chains like `r.cells(0).val`.
+                is_array = False
+                if self.match('OPERATOR', '('):
+                    is_array = True
+                    while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
+                        self.advance()
+                    self.consume('OPERATOR', ')')
+
                 var_type = 'Variant'
                 if self.match('IDENTIFIER', 'As'):
                     self.advance()
                     var_type = self.parse_type_signature()
-                
-                # Check for array
-                if self.match('OPERATOR', '('):
-                    while not self.match('OPERATOR', ')') and self.current_token.type != 'EOF':
-                        self.advance()
-                    self.consume('OPERATOR', ')')
+
+                if is_array:
                     var_type += "()"
-                
-                # Check for * N (Fixed length string) - simplified ignore
+
                 if self.match('OPERATOR', '*'):
                     self.advance()
-                    self.advance() # length
-                
+                    self.advance()
+
                 udt.members.append(VariableNode(var_name, var_type, 'Public'))
             
             if self.match('OPERATOR', ':'):
