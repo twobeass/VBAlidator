@@ -210,13 +210,42 @@ def _run_with_timeout(fn, args, *, timeout_s, host):
 
     pywin32 doesn't honour COM-call timeouts itself — this is the only
     way to avoid minute-long stalls in CI.
+
+    A fresh worker thread does NOT inherit the main thread's COM
+    apartment. Without `CoInitialize()` the first COM Dispatch raises
+    `HRESULT 0x800401F0 (CO_E_NOTINITIALIZED — "CoInitialize wurde nicht
+    aufgerufen")`. We initialise an STA apartment here and tear it down
+    in finally, balanced even when the worker raised.
     """
     import threading
+
+    # Lazy import: pythoncom is only available when pywin32 is installed,
+    # which is the same precondition `_ENV.win32com` already enforces
+    # before we reach this function. Linux callers never get here.
+    try:
+        import pythoncom  # type: ignore
+    except ImportError:
+        pythoncom = None  # type: ignore
 
     result: list = []
     error: list[Exception] = []
 
     def _worker():
+        # Initialise an STA apartment on this thread before any COM call.
+        # Idempotent against re-entrance (returns S_FALSE on second call),
+        # so this is safe even when the caller's own framework already
+        # did it.
+        com_initialised = False
+        if pythoncom is not None:
+            try:
+                pythoncom.CoInitialize()
+                com_initialised = True
+            except Exception as exc:
+                # If apartment init itself fails (e.g. the thread was
+                # already initialised with a different apartment model),
+                # surface it as the worker error rather than swallowing.
+                error.append(exc)
+                return
         try:
             result.append(fn(*args))
         except Exception as exc:
@@ -227,6 +256,16 @@ def _run_with_timeout(fn, args, *, timeout_s, host):
             # them here would suppress nothing useful and would mask
             # genuine signal-driven termination.
             error.append(exc)
+        finally:
+            if com_initialised and pythoncom is not None:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    # CoUninitialize can fail if the thread is already
+                    # being torn down by Python's interpreter shutdown.
+                    # Nothing we can do; the apartment dies with the
+                    # thread anyway.
+                    pass
 
     t = threading.Thread(target=_worker, name="vbalidator-roundtrip", daemon=True)
     t.start()

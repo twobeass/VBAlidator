@@ -499,3 +499,73 @@ def test_run_with_timeout_propagates_worker_exception():
 
     with pytest.raises(RuntimeError, match="real bug"):
         _run_with_timeout(_boom, (), timeout_s=5, host="excel")
+
+
+# ---- Worker-thread COM apartment init (Class A #4) --------------------
+
+
+def test_run_with_timeout_calls_coinitialize_when_pythoncom_present(monkeypatch):
+    """A worker thread does not inherit the main thread's COM apartment.
+    Without `CoInitialize()` the first COM Dispatch raises HRESULT
+    0x800401F0 (CO_E_NOTINITIALIZED). Verify the wrapper initialises
+    and tears down the apartment for the worker.
+    """
+    import sys
+    import types
+    from src import roundtrip
+
+    calls: list[str] = []
+
+    fake_pythoncom = types.ModuleType("pythoncom")
+    fake_pythoncom.CoInitialize = lambda: calls.append("init")  # type: ignore[attr-defined]
+    fake_pythoncom.CoUninitialize = lambda: calls.append("uninit")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+
+    result = roundtrip._run_with_timeout(
+        lambda: [{"ok": True}], (), timeout_s=5, host="excel",
+    )
+    assert result == [{"ok": True}]
+    # Init and uninit must be paired, and init must precede the target call.
+    assert calls == ["init", "uninit"], calls
+
+
+def test_run_with_timeout_uninitializes_com_even_on_worker_exception(monkeypatch):
+    """When the worker raises, CoUninitialize still runs (finally
+    block) so we don't leak apartment references on every failing
+    invocation."""
+    import sys
+    import types
+    from src import roundtrip
+
+    calls: list[str] = []
+    fake_pythoncom = types.ModuleType("pythoncom")
+    fake_pythoncom.CoInitialize = lambda: calls.append("init")  # type: ignore[attr-defined]
+    fake_pythoncom.CoUninitialize = lambda: calls.append("uninit")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+
+    def _boom():
+        raise RuntimeError("worker crashed")
+
+    with pytest.raises(RuntimeError, match="worker crashed"):
+        roundtrip._run_with_timeout(_boom, (), timeout_s=5, host="excel")
+    # Init succeeded → uninit must follow.
+    assert calls == ["init", "uninit"], calls
+
+
+def test_run_with_timeout_works_without_pythoncom(monkeypatch):
+    """On non-Windows hosts pythoncom isn't installed — the wrapper
+    must still work for the unit tests that exercise the surrounding
+    plumbing."""
+    import sys
+    from src import roundtrip
+
+    # Force pythoncom-import failure by injecting a sentinel that raises.
+    monkeypatch.setitem(sys.modules, "pythoncom", None)
+
+    # NOTE: monkeypatching to None makes `import pythoncom` raise
+    # ImportError; the wrapper catches that and proceeds without
+    # COM init.
+    result = roundtrip._run_with_timeout(
+        lambda: [{"ok": True}], (), timeout_s=5, host="excel",
+    )
+    assert result == [{"ok": True}]
