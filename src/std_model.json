@@ -150,6 +150,7 @@
     "Choose": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
     "Switch": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
     "Partition": { "type": "Function", "returns": "String", "min_args": 4, "max_args": 4 },
+    "CallByName": { "type": "Function", "returns": "Variant", "min_args": 3, "max_args": 99 },
 
     "DoEvents": { "type": "Function", "returns": "Integer", "min_args": 0, "max_args": 0 },
     "Beep": { "type": "Sub" },
@@ -188,6 +189,12 @@
     "vbEmpty": { "type": "Long" },
     "vbNull": { "type": "Long" },
     "vbUserDefinedType": { "type": "Long" },
+
+    "vbMethod": { "type": "Long" },
+    "vbGet": { "type": "Long" },
+    "vbLet": { "type": "Long" },
+    "vbSet": { "type": "Long" },
+
     "vbBinaryCompare": { "type": "Long" },
     "vbTextCompare": { "type": "Long" },
     "vbDatabaseCompare": { "type": "Long" },
@@ -252,6 +259,40 @@
     "vbAlias": { "type": "Long" },
     "vbArchive": { "type": "Long" },
     "vbNormal": { "type": "Long" }
+  },
+  "enums": {
+    "VbCallType": {
+      "vbMethod": 1,
+      "vbGet": 2,
+      "vbLet": 4,
+      "vbSet": 8
+    },
+    "VbVarType": {
+      "vbEmpty": 0,
+      "vbNull": 1,
+      "vbInteger": 2,
+      "vbLong": 3,
+      "vbSingle": 4,
+      "vbDouble": 5,
+      "vbCurrency": 6,
+      "vbDate": 7,
+      "vbString": 8,
+      "vbObject": 9,
+      "vbError": 10,
+      "vbBoolean": 11,
+      "vbVariant": 12,
+      "vbDataObject": 13,
+      "vbDecimal": 14,
+      "vbByte": 17,
+      "vbLongLong": 20,
+      "vbUserDefinedType": 36,
+      "vbArray": 8192
+    },
+    "VbCompareMethod": {
+      "vbBinaryCompare": 0,
+      "vbTextCompare": 1,
+      "vbDatabaseCompare": 2
+    }
   },
   "classes": {
     "Clipboard": {

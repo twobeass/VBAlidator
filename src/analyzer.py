@@ -501,6 +501,8 @@ class Analyzer:
         - `On Error GoTo -1`    → clears active error (Office VBA)
         - `On Error Resume Next`
         - `Resume` / `Resume Next` (no label)
+        - `On <expr> GoTo lbl1, lbl2, ...` and `On <expr> GoSub …`
+          (computed-GoTo jump table)
         """
         if not tokens or self._current_labels is None:
             return
@@ -533,6 +535,17 @@ class Analyzer:
                     self._check_label_exists(target_tok, filename, context, "On Error GoTo")
                     return
             return
+
+        # `On <expr> GoTo lbl1, lbl2, ...` / `On <expr> GoSub lbl1, lbl2`
+        # (computed-GoTo jump table; the labels after the keyword are a
+        # comma-separated list, not value references.)
+        if first == 'on':
+            j = self._find_on_jump_keyword(tokens)
+            if j is not None:
+                kind = "On GoTo" if tokens[j].value.lower() == 'goto' else "On GoSub"
+                for tok in self._iter_label_list(tokens[j + 1:]):
+                    self._check_label_exists(tok, filename, context, kind)
+                return
 
         if first == 'goto':
             if n >= 2 and tokens[1].type == 'IDENTIFIER':
@@ -571,6 +584,49 @@ class Analyzer:
                     f"Declared labels: {sorted(self._current_labels) or 'none'}."
                 ),
             })
+
+    @staticmethod
+    def _find_on_jump_keyword(tokens):
+        """Locate the index of `GoTo`/`GoSub` in an `On <expr> GoTo …` /
+        `On <expr> GoSub …` statement (the computed-GoTo form). Returns
+        None if this isn't an On-jump-table statement.
+
+        Skips identifiers/operators inside the `<expr>` portion. The
+        keyword we're looking for is the bare `GoTo` or `GoSub`
+        (NOT `On Error GoTo`, handled separately).
+        """
+        if not tokens or tokens[0].type != 'IDENTIFIER' or tokens[0].value.lower() != 'on':
+            return None
+        depth = 0
+        for idx in range(1, len(tokens)):
+            t = tokens[idx]
+            if t.type == 'OPERATOR':
+                if t.value == '(':
+                    depth += 1
+                elif t.value == ')':
+                    depth -= 1
+                continue
+            if depth == 0 and t.type == 'IDENTIFIER':
+                lv = t.value.lower()
+                if lv in ('goto', 'gosub'):
+                    return idx
+                if lv == 'error':
+                    return None  # handled by On Error branch
+        return None
+
+    @staticmethod
+    def _iter_label_list(tokens):
+        """Yield the identifier tokens from a comma-separated label list
+        like `lbl1, lbl2, lblN`. Stops at end of token stream or at a
+        colon (statement separator)."""
+        for t in tokens:
+            if t.type == 'OPERATOR':
+                if t.value == ':':
+                    return
+                # commas and other operators are skipped
+                continue
+            if t.type == 'IDENTIFIER':
+                yield t
 
     # ---- Phase 2.2: Set vs. Let assignment enforcement -------------------
 
@@ -933,12 +989,50 @@ class Analyzer:
         """Validate ReDim targets:
         - The target must resolve to an array variable (declared `Dim x()`,
           `Dim x() As T`, or already-redimmed). Variant is permissive.
-        - Dimension expressions must be analyzable (identifiers/types valid).
+        - Dotted targets like `ReDim This.scopes(1 To N)` walk the member
+          chain through `_resolve_lhs_type` (P2.6 chain walker) so UDT
+          and class array members are recognised.
+        - Dimension expressions must be analyzable.
         """
-        for name_token, dim_tokens, _as_type in node.targets:
+        for target in node.targets:
+            # Backwards-compatible unpack: (name_token, dim_tokens, as_type)
+            # or (name_token, dim_tokens, as_type, chain_tokens).
+            chain_tokens = None
+            if len(target) >= 4:
+                name_token, dim_tokens, _as_type, chain_tokens = target[0], target[1], target[2], target[3]
+            else:
+                name_token, dim_tokens, _as_type = target[0], target[1], target[2]
             if name_token is None:
                 continue
             name = name_token.value
+
+            # Dotted target: walk the chain via the P2.6 LHS resolver.
+            if chain_tokens and len(chain_tokens) > 1:
+                resolved_type, resolved_kind = self._resolve_lhs_type(chain_tokens, scope)
+                display = "".join(t.value for t in chain_tokens)
+                if resolved_type is None:
+                    # The chain root is unknown OR an intermediate hop
+                    # is permissive (Object / Variant / unloaded ref) —
+                    # in either case we can't usefully validate the
+                    # array-ness, so stay silent rather than emit a
+                    # false VBA101 on the leaf.
+                    pass
+                else:
+                    target_type = (resolved_type or "").lower()
+                    is_array = target_type.endswith("()") or "array" in target_type
+                    is_variant = target_type in ("variant", "")
+                    if not (is_array or is_variant):
+                        self.errors.append({
+                            "file": filename,
+                            "line": name_token.line,
+                            "rule_id": "VBA103",
+                            "severity": "error",
+                            "message": f"ReDim target '{display}' must be a dynamic array, got type '{resolved_type}' in '{context}'.",
+                        })
+                if dim_tokens:
+                    self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+                continue
+
             sym = scope.resolve(name)
             if sym is None:
                 self.errors.append({
@@ -951,12 +1045,9 @@ class Analyzer:
             else:
                 target_type = (sym.get("type") or "").lower()
                 kind = (sym.get("kind") or "").lower()
-                # Accept arrays (suffix "()"), Variant, or symbols with a kind
-                # that indicates an array-capable container.
                 is_array = target_type.endswith("()") or "array" in target_type
                 is_variant = target_type in ("variant", "")
                 if kind not in ("variable", "expression") and kind != "":
-                    # Not a local/module variable — likely procedure / class / library.
                     self.errors.append({
                         "file": filename,
                         "line": name_token.line,
@@ -973,7 +1064,6 @@ class Analyzer:
                         "message": f"ReDim target '{name}' must be a dynamic array, got type '{sym.get('type')}' in '{context}'.",
                     })
 
-            # Walk dim expressions so any nested identifiers get checked too.
             if dim_tokens:
                 self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
 
@@ -1367,6 +1457,18 @@ class Analyzer:
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
 
     def analyze_statement(self, tokens, scope, filename, context, with_stack, report_errors=True):
+        # `On <expr> GoTo lbl1, lbl2, ...` (computed GoTo). Analyse the
+        # selector expression normally and skip the label list — those
+        # identifiers are validated by `_validate_jump_target`, not as
+        # value references (otherwise every label fires VBA001).
+        if tokens and tokens[0].type == 'IDENTIFIER' and tokens[0].value.lower() == 'on':
+            j = self._find_on_jump_keyword(tokens)
+            if j is not None and j >= 2:
+                self.analyze_expression_info(
+                    tokens[1:j], scope, filename, context, with_stack,
+                    report_errors=report_errors,
+                )
+                return None
         type_name, _, _ = self.analyze_expression_info(tokens, scope, filename, context, with_stack, report_errors=report_errors)
         return type_name
 

@@ -1132,13 +1132,19 @@ class VBAParser:
             raw_tokens.append(name_token)
             self.advance()
 
-            # Skip qualified name: foo.bar.baz
+            # Track the full chain so the analyser can resolve dotted
+            # ReDim targets (`ReDim This.scopes(1 To N)`) via the same
+            # member-walker that powers P2.6 member-chain typing.
+            chain_tokens = [name_token]
             while self.match('OPERATOR', '.'):
-                raw_tokens.append(self.current_token)
+                dot_tok = self.current_token
+                raw_tokens.append(dot_tok)
+                chain_tokens.append(dot_tok)
                 self.advance()
                 if self.current_token.type == 'IDENTIFIER':
                     name_token = self.current_token
                     raw_tokens.append(name_token)
+                    chain_tokens.append(name_token)
                     self.advance()
 
             # Dimension expression in parens
@@ -1175,7 +1181,7 @@ class VBAParser:
                     self.advance()
                 as_type = ''.join(t.value for t in type_tokens).strip() or None
 
-            targets.append((name_token, dim_tokens, as_type))
+            targets.append((name_token, dim_tokens, as_type, chain_tokens))
 
             # Comma → next target on same statement
             if self.match('OPERATOR', ','):

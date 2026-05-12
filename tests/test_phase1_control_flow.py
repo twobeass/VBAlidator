@@ -182,8 +182,13 @@ End Sub
     r = redims[0]
     assert r.preserve is True
     assert len(r.targets) == 1
-    name_token, _dim_tokens, _as_type = r.targets[0]
+    target = r.targets[0]
+    name_token = target[0]
     assert name_token.value.lower() == "arr"
+    # P2.6/#20: targets now include chain_tokens for dotted-target support.
+    if len(target) >= 4:
+        chain = target[3]
+        assert [t.value.lower() for t in chain] == ["arr"]
 
 
 def test_erase_node_parsed():

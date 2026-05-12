@@ -26,7 +26,7 @@ BASELINE: dict[str, tuple[int, str]] = {
     "JSONBag": (1, "baseline phase-3+P2.6 fixup; ComctlLib chains now permissive"),
     "VBA-MemoryTools-master": (17, "baseline phase-3+P2.6 fixup"),
     "VbTrickTimer-master": (5, "baseline phase-3; preprocessor case-fix + numeric type suffix"),
-    "stdVBA-master": (289, "baseline phase-3+P2.6 fixup; procedure-kind FPs + #N file-number lexer fix"),
+    "stdVBA-master": (180, "baseline iter-4-wave-4; +On…GoTo +CallByName +ReDim member chain"),
 }
 
 
