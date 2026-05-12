@@ -502,3 +502,48 @@ def test_pipeline_errors_route_to_stderr_under_quiet(tmp_path):
     # CI pipes).
     assert out.stdout == "", f"stdout should be empty: {out.stdout!r}"
     assert "does not exist" in out.stderr.lower()
+
+
+# ---- Public import contract (UAT §5) ------------------------------------
+
+
+def test_vbalidator_package_top_level_imports():
+    """UAT §5: after `pip install vbalidator`, the user-facing import is
+    `from vbalidator import precheck, precheck_source, PrecheckResult`.
+
+    The implementation still lives under `src/` (renamed in a future
+    PR); a compatibility shim at `vbalidator/__init__.py` re-exports
+    the public surface so the import name matches the PyPI
+    distribution name.
+    """
+    import importlib
+    mod = importlib.import_module("vbalidator")
+    for name in ("precheck", "precheck_source", "PrecheckResult", "__version__"):
+        assert hasattr(mod, name), f"vbalidator.{name} missing — UAT §5 broken"
+
+    # Identity check: the re-exported precheck must BE the same object
+    # `from src import precheck` returns. Otherwise monkeypatches in
+    # one namespace silently miss the other.
+    from src import precheck as src_precheck
+    from vbalidator import precheck as vba_precheck
+    assert src_precheck is vba_precheck, (
+        "vbalidator.precheck must alias src.precheck, not duplicate it"
+    )
+
+
+def test_vbalidator_submodule_imports_resolve():
+    """Inner-module imports must resolve too — tooling that does
+    `from vbalidator.rules import all_rules` shouldn't have to know
+    about the src/ implementation detail."""
+    import importlib
+    for sub in ("api", "scoring", "reporting", "rules", "roundtrip",
+                "analyzer", "lexer", "parser", "preprocessor", "config"):
+        importlib.import_module(f"vbalidator.{sub}")
+
+
+def test_vbalidator_version_matches_pyproject():
+    """`vbalidator.__version__` is the canonical published version and
+    must equal `src.__version__`. python-semantic-release writes both."""
+    from src import __version__ as src_version
+    from vbalidator import __version__ as pkg_version
+    assert src_version == pkg_version

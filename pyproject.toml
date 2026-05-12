@@ -56,7 +56,11 @@ vbalidator = "src.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+# `vbalidator` is the user-facing import name (compatibility shim); the
+# implementation still lives under `src/` until a future PR moves the
+# source tree. Keep both included so `from src import …` (used by
+# tests + tooling) AND `from vbalidator import …` (PyPI users) work.
+include = ["src*", "vbalidator*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "models/*.json"]
