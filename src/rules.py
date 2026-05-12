@@ -634,6 +634,69 @@ _RULES: list[Rule] = [
         ),
         fix_hint="Use the End form that matches the procedure declaration.",
     ),
+
+    # -- Phase 3.5 — Statement placement -----------------------------
+    Rule(
+        rule_id="VBA360",
+        title="Module-only declaration inside a procedure body",
+        severity="error",
+        category="placement",
+        phase="3.5",
+        description=(
+            "`Type`, `Enum`, `Declare`, `Option`, `Implements` and the "
+            "`DefInt`/`DefStr`/… family are only legal at module scope. "
+            "VBE refuses to compile a Sub/Function/Property that contains "
+            "one of these declarations."
+        ),
+        fail_example=(
+            "Sub S()\n"
+            "    Type Point\n"
+            "        x As Long\n"
+            "        y As Long\n"
+            "    End Type\n"
+            "End Sub\n"
+        ),
+        ok_example=(
+            "Type Point\n"
+            "    x As Long\n"
+            "    y As Long\n"
+            "End Type\n"
+            "\n"
+            "Sub S()\n"
+            "    Dim p As Point\n"
+            "End Sub\n"
+        ),
+        fix_hint="Move the declaration outside any procedure, between the module attributes and the first Sub/Function.",
+    ),
+    Rule(
+        rule_id="VBA361",
+        title="Executable statement at module level",
+        severity="error",
+        category="placement",
+        phase="3.5",
+        description=(
+            "Code outside a Sub/Function/Property runs implicitly at "
+            "module load — but VBA only permits *declarative* statements "
+            "(`Public`/`Private`/`Dim`/`Const`/`Type`/`Enum`/`Declare`/"
+            "`Option`/`Implements`/`Attribute`/`DefXxx`) in that position. "
+            "A stray `Debug.Print` or assignment at module top is a hard "
+            "compile error."
+        ),
+        fail_example=(
+            'Attribute VB_Name = "M"\n'
+            "Option Explicit\n"
+            "Debug.Print \"this is illegal at module level\"\n"
+            "Sub S(): End Sub\n"
+        ),
+        ok_example=(
+            'Attribute VB_Name = "M"\n'
+            "Option Explicit\n"
+            "Sub S()\n"
+            "    Debug.Print \"executed when S runs\"\n"
+            "End Sub\n"
+        ),
+        fix_hint="Move the statement into a procedure body — `Sub Main()` is a common entry point, or wrap it in an `Auto_Open` / `Workbook_Open` event handler.",
+    ),
 ]
 
 

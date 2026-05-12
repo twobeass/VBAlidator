@@ -334,3 +334,99 @@ def test_matching_end_terminator_is_clean(run_source):
     )
     result = run_source(code)
     assert all(e.get("rule_id") != "VBA350" for e in result.errors), result.errors
+
+
+# ---- VBA360 / VBA361 — statement placement (P3.5) ---------------------
+
+
+def test_type_inside_procedure_flagged(run_source):
+    """`Type ... End Type` is module-only. Declaring it inside a Sub
+    is a hard VBA compile error."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Type Point\n"
+        "        x As Long\n"
+        "    End Type\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA360" for e in result.errors), result.errors
+
+
+def test_enum_inside_procedure_flagged(run_source):
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Enum Colors\n"
+        "        Red = 1\n"
+        "    End Enum\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA360" for e in result.errors), result.errors
+
+
+def test_declare_inside_procedure_flagged(run_source):
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        '    Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long\n'
+        "End Sub\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA360" for e in result.errors), result.errors
+
+
+def test_module_level_type_passes(run_source):
+    """Symmetric guard: same `Type ... End Type` at module scope is fine."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "\n"
+        "Type Point\n"
+        "    x As Long\n"
+        "End Type\n"
+        "\n"
+        "Sub S()\n"
+        "    Dim p As Point\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    assert all(e.get("rule_id") != "VBA360" for e in result.errors), result.errors
+
+
+def test_executable_at_module_level_flagged(run_source):
+    """Free-standing `Debug.Print` at module top is illegal in VBA."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        'Debug.Print "illegal at module level"\n'
+        "Sub S(): End Sub\n"
+    )
+    result = run_source(code)
+    assert any(e.get("rule_id") == "VBA361" for e in result.errors), result.errors
+
+
+def test_class_module_header_does_not_trigger_vba361(run_source):
+    """The `.cls` export header (VERSION + BEGIN…END attribute block) is
+    a serialisation artefact, not VBA code — must not trip VBA361 even
+    though the BEGIN block contains assignment-like lines."""
+    code = (
+        "VERSION 1.0 CLASS\n"
+        "BEGIN\n"
+        "  MultiUse = -1  'True\n"
+        "  Persistable = 0\n"
+        "  DataBindingBehavior = 0\n"
+        "END\n"
+        'Attribute VB_Name = "MyClass"\n'
+        "Option Explicit\n"
+        "Public Sub Greet()\n"
+        "End Sub\n"
+    )
+    result = run_source(code, module_type="Class")
+    bad = [e for e in result.errors if e.get("rule_id") == "VBA361"]
+    assert not bad, f"`.cls` header block must not produce VBA361. Got: {bad!r}"

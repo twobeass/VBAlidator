@@ -208,6 +208,16 @@ class VBAParser:
         while self.current_token.type != 'EOF':
             if self.match('IDENTIFIER', 'Attribute'):
                 self.parse_attribute(module)
+            elif self.match('IDENTIFIER', 'VERSION'):
+                # `.cls` / `.frm` file header — `VERSION 1.0 CLASS`
+                # appears before the Attribute block and isn't a
+                # language construct.
+                self.consume_statement()
+            elif self.match('IDENTIFIER', 'BEGIN'):
+                # `.cls` BEGIN…END attribute block — consume every line
+                # until a matching `END`. Cannot use consume_statement
+                # because each property line ends with NEWLINE not `:`.
+                self._consume_begin_end_block()
             elif self.match('IDENTIFIER', 'Option'):
                 self._parse_option(module)
             elif self.match('IDENTIFIER', 'Implements'):
@@ -242,9 +252,74 @@ class VBAParser:
             elif self.match('NEWLINE'):
                 self.advance()
             else:
+                # P3.5 — anything reaching this branch is a token at
+                # module level that didn't match a valid declaration form.
+                # That means it's either an executable statement (illegal
+                # outside a procedure body in VBA) or an unrecognised
+                # token. Flag once per offending line, then skip so the
+                # rest of the module continues to parse.
+                self._record_module_level_executable(module)
                 self.consume_statement()
-        
+
         return module
+
+    def _consume_begin_end_block(self):
+        """Skip a `.cls` / `.frm` BEGIN…END attribute block.
+
+        These appear in VBE-exported class/form files and look like:
+
+            BEGIN
+              MultiUse = -1  'True
+              Persistable = 0
+              DataBindingBehavior = 0
+            END
+
+        They are an MS-VBA serialisation artefact, not VBA code. The
+        roundtrip path already strips them in `_strip_export_directives`;
+        the parser now handles them here for the non-roundtrip path.
+        """
+        self.advance()  # consume BEGIN
+        depth = 1
+        while self.current_token.type != 'EOF' and depth > 0:
+            if self.match('IDENTIFIER', 'BEGIN'):
+                depth += 1
+                self.advance()
+            elif self.match('IDENTIFIER', 'END'):
+                depth -= 1
+                self.advance()
+            else:
+                self.advance()
+
+    def _record_module_level_executable(self, module):
+        """Emit VBA361 for executable code that appears at module level.
+
+        Skips obvious non-statements (a stray standalone keyword the
+        analyzer already complains about, a comment, …) so the rule
+        only fires on real placement bugs.
+        """
+        tok = self.current_token
+        if tok.type not in ('IDENTIFIER', 'OPERATOR'):
+            return
+        if tok.type == 'OPERATOR' and tok.value in (':',):
+            return
+        # Don't double-report on tokens that are part of a control flow
+        # form parsed elsewhere (End / Loop / Wend / Next at module
+        # level just unwind into the catch-all branch).
+        if tok.type == 'IDENTIFIER' and tok.value.lower() in (
+            'end', 'loop', 'wend', 'next', 'else', 'elseif', 'case',
+        ):
+            return
+        self.errors.append({
+            "file": self.filename,
+            "line": tok.line,
+            "rule_id": "VBA361",
+            "severity": "error",
+            "message": (
+                f"Executable statement '{tok.value}' at module level. "
+                f"Move it into a Sub or Function body, or wrap it in "
+                f"`Public Const` / `Public Sub` / `Public Function`."
+            ),
+        })
 
     _DEFTYPE_TO_TYPE = {
         'defbool': 'Boolean', 'defbyte': 'Byte', 'defint': 'Integer',
@@ -655,6 +730,13 @@ class VBAParser:
                 stmt = self.collect_statement()
                 nodes.append(StatementNode(stmt))
 
+            elif self._matches_module_only_keyword():
+                # P3.5 — `Type`, `Enum`, `Declare`, `Option`, `Implements`
+                # and the `DefXxx` family are module-level-only in VBA.
+                # Flag once and consume the line so the procedure body
+                # keeps parsing.
+                self._record_proc_level_module_only(nodes)
+
             elif self.match('IDENTIFIER', 'ReDim'):
                 nodes.append(self.parse_redim())
 
@@ -969,6 +1051,50 @@ class VBAParser:
         self.consume_statement()
 
         return SelectNode(expr_tokens=expr_tokens, cases=cases, line=line)
+
+    # ---- P3.5 — module-only keyword detection at procedure level ----
+    # Keywords that VBA only accepts at module level. We add the `DefXxx`
+    # family at runtime via prefix match.
+    _MODULE_ONLY_KEYWORDS = {
+        'type', 'enum', 'declare', 'option', 'implements',
+    }
+
+    def _matches_module_only_keyword(self) -> bool:
+        if self.current_token.type != 'IDENTIFIER':
+            return False
+        low = self.current_token.value.lower()
+        if low in self._MODULE_ONLY_KEYWORDS:
+            return True
+        # `DefBool`, `DefInt`, `DefStr`, … — all start with `def` and
+        # are 6+ chars; differentiate from local variable names like
+        # `defaultValue` by requiring the 4th character to be uppercase
+        # in the original source (DefInt vs default*) — too fragile,
+        # we use a hardcoded set instead.
+        return low in {
+            'defbool', 'defbyte', 'defint', 'deflng', 'deflnglng',
+            'deflngptr', 'defcur', 'defsng', 'defdbl', 'defdate',
+            'defstr', 'defobj', 'defvar',
+        }
+
+    def _record_proc_level_module_only(self, nodes):
+        tok = self.current_token
+        self.errors.append({
+            "file": self.filename,
+            "line": tok.line,
+            "rule_id": "VBA360",
+            "severity": "error",
+            "message": (
+                f"`{tok.value}` is only legal at module level — VBA does "
+                f"not allow it inside a procedure body. Move the "
+                f"declaration to module scope (outside any "
+                f"Sub/Function/Property)."
+            ),
+        })
+        # Wrap the offender as a StatementNode so analyse / reporting
+        # paths don't trip on a missing node, then advance past the line.
+        stmt = self.collect_statement()
+        if stmt:
+            nodes.append(StatementNode(stmt))
 
     def parse_redim(self):
         """ReDim [Preserve] target1(dims) [As Type] [, target2(...) ...]"""
