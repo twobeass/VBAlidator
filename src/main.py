@@ -60,18 +60,23 @@ def main():
     )
     parser.add_argument(
         "--host",
-        choices=["excel", "word", "access", "outlook", "visio", "mscomctl", "msforms"],
+        choices=[
+            "excel", "word", "access", "outlook", "visio",
+            "mscomctl", "msforms",
+            "scripting", "vbscript_regexp", "wscript_shell", "shell_application",
+        ],
         help="Built-in host model to load (Excel/Word/Access/Outlook/Visio/"
-             "MSComCtl/MSForms). Bundled models/<host>.json is layered on "
+             "MSComCtl/MSForms/Scripting/VBScript_RegExp/WScript_Shell/"
+             "Shell_Application). Bundled models/<host>.json is layered on "
              "top of the standard model so the user does not need to run "
              "the VBA_Model_Exporter.bas first. Excel/Word/Access/Visio are "
-             "full-fidelity models from real Office type libraries; MSComCtl "
-             "ships the Microsoft Common Controls (TreeView/ListView/…) and "
-             "auto-layers when any `.frm` references the library; MSForms 2.0 "
-             "ships UserForm + the standard controls (CommandButton/TextBox/"
-             "Frame/MultiPage/…) and auto-layers when any source file "
-             "references the `MSForms.` namespace — explicit `--host "
-             "mscomctl|msforms` is rarely needed. Outlook is a minimal "
+             "full-fidelity models from real Office type libraries; the "
+             "companion stubs (MSComCtl/MSForms/Scripting/…) cover the "
+             "common COM libraries and **auto-layer** whenever any scanned "
+             "file mentions their ProgID / namespace (`Scripting.Dictionary`, "
+             "`VBScript.RegExp`, `WScript.Shell`, `Shell.Application`, "
+             "`MSForms.X`, or a `.frm` referencing ComctlLib) — explicit "
+             "`--host <name>` is rarely needed. Outlook is a minimal "
              "hand-curated stub (the COM/TLB path is GPO-blocked on most "
              "managed installs).",
     )

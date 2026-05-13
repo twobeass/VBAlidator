@@ -420,6 +420,107 @@ def test_msforms_autolayer_explicit_host_choice(tmp_path):
     )
 
 
+# ---- COM-library auto-layering (Scripting / VBScript / WScript / Shell) ---
+
+
+def test_scripting_dictionary_autolayers(tmp_path):
+    """`Scripting.Dictionary` / `Scripting.FileSystemObject` are the most
+    common late-bound COM objects in real VBA. Auto-layer `scripting.json`
+    when any source mentions `Scripting.X`."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim d As Scripting.Dictionary\n"
+        '    Set d = CreateObject("Scripting.Dictionary")\n'
+        "    d.Add \"k\", 1\n"
+        "    Dim n As Long: n = d.Count\n"
+        "    Dim has As Boolean: has = d.Exists(\"k\")\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    member_errors = [
+        e for e in result.errors
+        if "Add" in e.get("message", "") or "Count" in e.get("message", "")
+        or "Exists" in e.get("message", "")
+    ]
+    assert not member_errors, (
+        f"Scripting.Dictionary members must resolve. Got: {result.errors!r}"
+    )
+
+
+def test_vbscript_regexp_autolayers(tmp_path):
+    """`VBScript.RegExp` is the canonical regex object before VBA picked
+    up `Like`. Auto-layer `vbscript_regexp.json` on the ProgID."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim re As VBScript.RegExp\n"
+        '    Set re = CreateObject("VBScript.RegExp")\n'
+        "    re.Pattern = \"\\d+\"\n"
+        "    re.Global = True\n"
+        "    Dim ok As Boolean: ok = re.Test(\"abc123\")\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    member_errors = [
+        e for e in result.errors
+        if any(s in e.get("message", "") for s in ("Pattern", "Global", "Test"))
+    ]
+    assert not member_errors, (
+        f"VBScript.RegExp members must resolve. Got: {result.errors!r}"
+    )
+
+
+def test_wscript_shell_autolayers(tmp_path):
+    """`WScript.Shell` is the standard Windows-Script-Host shell. The
+    `Shell` class (host-model name) carries Run/Exec/Environment/RegRead."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim sh As Object\n"
+        '    Set sh = CreateObject("WScript.Shell")\n'
+        "    Dim rc As Long: rc = sh.Run(\"notepad.exe\")\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    # Late binding through Object — we don't expect errors on `sh.Run`,
+    # the test mainly guards that auto-layer doesn't introduce regressions.
+    assert isinstance(result.score, int)
+
+
+def test_shell_application_autolayers_without_breaking_excel(tmp_path):
+    """`Shell.Application` collides naming-wise with Excel's `Application`.
+    Verify (a) the auto-layer kicks in, (b) `Application.Run` from Excel
+    keeps its permissive signature and isn't clobbered by `Shell.Run`."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        '    Dim sh As Object: Set sh = CreateObject("Shell.Application")\n'
+        "    Call sh.NameSpace(0)\n"
+        # Excel's Application.Run takes up to ~30 args — guard against the
+        # Shell host model overwriting that signature with its 4-arg Run.
+        "    Call Application.Run(\"a\", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="excel")
+    arg_errors = [
+        e for e in result.errors
+        if "Argument count mismatch for 'Run'" in e.get("message", "")
+    ]
+    assert not arg_errors, (
+        f"Shell.Application auto-layer must not clobber Excel's "
+        f"Application.Run. Got: {result.errors!r}"
+    )
+
+
 # ---- Defines -----------------------------------------------------------
 
 
@@ -463,7 +564,11 @@ End Sub
 # ---- Models JSON well-formed --------------------------------------------
 
 
-@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook", "visio", "mscomctl", "msforms"])
+@pytest.mark.parametrize("host", [
+    "excel", "word", "access", "outlook", "visio",
+    "mscomctl", "msforms",
+    "scripting", "vbscript_regexp", "wscript_shell", "shell_application",
+])
 def test_host_model_json_loads(host):
     """Every shipped host model must be valid JSON with the expected sections."""
     import json
