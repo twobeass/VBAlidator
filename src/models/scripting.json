@@ -1,0 +1,188 @@
+{
+  "_doc": "Microsoft Scripting Runtime (scrrun.dll) — hand-curated stub covering the Dictionary, FileSystemObject, and helper classes that real-world VBA code reaches for. Auto-layers on any source mentioning `Scripting.` or the bare ProgID strings `Scripting.Dictionary` / `Scripting.FileSystemObject`.",
+  "globals": {
+    "Scripting": { "type": "Variant" }
+  },
+  "classes": {
+    "Dictionary": {
+      "type": "Class",
+      "members": {
+        "Add": { "type": "Sub", "min_args": 2, "max_args": 2 },
+        "Count": { "type": "Long" },
+        "CompareMode": { "type": "Long" },
+        "Exists": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
+        "Item": { "type": "Function", "returns": "Variant", "min_args": 1, "max_args": 1 },
+        "Items": { "type": "Function", "returns": "Variant", "min_args": 0, "max_args": 0 },
+        "Key": { "type": "Variant" },
+        "Keys": { "type": "Function", "returns": "Variant", "min_args": 0, "max_args": 0 },
+        "Remove": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "RemoveAll": { "type": "Sub", "min_args": 0, "max_args": 0 },
+        "HashVal": { "type": "Function", "returns": "Variant", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "FileSystemObject": {
+      "type": "Class",
+      "members": {
+        "BuildPath": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+        "CopyFile": { "type": "Sub", "min_args": 2, "max_args": 3 },
+        "CopyFolder": { "type": "Sub", "min_args": 2, "max_args": 3 },
+        "CreateFolder": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 },
+        "CreateTextFile": { "type": "Function", "returns": "TextStream", "min_args": 1, "max_args": 3 },
+        "DeleteFile": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "DeleteFolder": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "DriveExists": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
+        "FileExists": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
+        "FolderExists": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
+        "GetAbsolutePathName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetBaseName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetDrive": { "type": "Function", "returns": "Drive", "min_args": 1, "max_args": 1 },
+        "GetDriveName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetExtensionName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetFile": { "type": "Function", "returns": "File", "min_args": 1, "max_args": 1 },
+        "GetFileName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetFileVersion": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetFolder": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 },
+        "GetParentFolderName": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "GetSpecialFolder": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 },
+        "GetStandardStream": { "type": "Function", "returns": "TextStream", "min_args": 1, "max_args": 2 },
+        "GetTempName": { "type": "Function", "returns": "String", "min_args": 0, "max_args": 0 },
+        "MoveFile": { "type": "Sub", "min_args": 2, "max_args": 2 },
+        "MoveFolder": { "type": "Sub", "min_args": 2, "max_args": 2 },
+        "OpenTextFile": { "type": "Function", "returns": "TextStream", "min_args": 1, "max_args": 4 },
+        "Drives": { "type": "Drives" }
+      }
+    },
+    "Drive": {
+      "type": "Class",
+      "members": {
+        "AvailableSpace": { "type": "Variant" },
+        "DriveLetter": { "type": "String" },
+        "DriveType": { "type": "Long" },
+        "FileSystem": { "type": "String" },
+        "FreeSpace": { "type": "Variant" },
+        "IsReady": { "type": "Boolean" },
+        "Path": { "type": "String" },
+        "RootFolder": { "type": "Folder" },
+        "SerialNumber": { "type": "Long" },
+        "ShareName": { "type": "String" },
+        "TotalSize": { "type": "Variant" },
+        "VolumeName": { "type": "String" }
+      }
+    },
+    "Drives": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Drive", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "Folder": {
+      "type": "Class",
+      "members": {
+        "Attributes": { "type": "Long" },
+        "DateCreated": { "type": "Date" },
+        "DateLastAccessed": { "type": "Date" },
+        "DateLastModified": { "type": "Date" },
+        "Drive": { "type": "Drive" },
+        "Files": { "type": "Files" },
+        "IsRootFolder": { "type": "Boolean" },
+        "Name": { "type": "String" },
+        "ParentFolder": { "type": "Folder" },
+        "Path": { "type": "String" },
+        "ShortName": { "type": "String" },
+        "ShortPath": { "type": "String" },
+        "Size": { "type": "Variant" },
+        "SubFolders": { "type": "Folders" },
+        "Type": { "type": "String" },
+        "Copy": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "CreateTextFile": { "type": "Function", "returns": "TextStream", "min_args": 1, "max_args": 3 },
+        "Delete": { "type": "Sub", "min_args": 0, "max_args": 1 },
+        "Move": { "type": "Sub", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "Folders": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 },
+        "Add": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "File": {
+      "type": "Class",
+      "members": {
+        "Attributes": { "type": "Long" },
+        "DateCreated": { "type": "Date" },
+        "DateLastAccessed": { "type": "Date" },
+        "DateLastModified": { "type": "Date" },
+        "Drive": { "type": "Drive" },
+        "Name": { "type": "String" },
+        "ParentFolder": { "type": "Folder" },
+        "Path": { "type": "String" },
+        "ShortName": { "type": "String" },
+        "ShortPath": { "type": "String" },
+        "Size": { "type": "Variant" },
+        "Type": { "type": "String" },
+        "Copy": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "Delete": { "type": "Sub", "min_args": 0, "max_args": 1 },
+        "Move": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "OpenAsTextStream": { "type": "Function", "returns": "TextStream", "min_args": 0, "max_args": 2 }
+      }
+    },
+    "Files": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "File", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "TextStream": {
+      "type": "Class",
+      "members": {
+        "AtEndOfLine": { "type": "Boolean" },
+        "AtEndOfStream": { "type": "Boolean" },
+        "Column": { "type": "Long" },
+        "Line": { "type": "Long" },
+        "Close": { "type": "Sub", "min_args": 0, "max_args": 0 },
+        "Read": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "ReadAll": { "type": "Function", "returns": "String", "min_args": 0, "max_args": 0 },
+        "ReadLine": { "type": "Function", "returns": "String", "min_args": 0, "max_args": 0 },
+        "Skip": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "SkipLine": { "type": "Sub", "min_args": 0, "max_args": 0 },
+        "Write": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "WriteBlankLines": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "WriteLine": { "type": "Sub", "min_args": 0, "max_args": 1 }
+      }
+    }
+  },
+  "enums": {
+    "IOMode": {
+      "ForReading": 1,
+      "ForWriting": 2,
+      "ForAppending": 8
+    },
+    "Tristate": {
+      "TristateUseDefault": -2,
+      "TristateTrue": -1,
+      "TristateFalse": 0
+    },
+    "DriveTypeConst": {
+      "UnknownType": 0,
+      "Removable": 1,
+      "Fixed": 2,
+      "Remote": 3,
+      "CDRom": 4,
+      "RamDisk": 5
+    },
+    "SpecialFolderConst": {
+      "WindowsFolder": 0,
+      "SystemFolder": 1,
+      "TemporaryFolder": 2
+    },
+    "CompareMethod": {
+      "BinaryCompare": 0,
+      "TextCompare": 1,
+      "DatabaseCompare": 2
+    }
+  }
+}

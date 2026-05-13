@@ -68,29 +68,19 @@ def run_pipeline_on_files(
             config.load_model(str(model_path))
 
     # Pre-scan: auto-layer companion models when the scan set references
-    # them, so callers don't need to spell out `--host mscomctl` /
-    # `--host msforms` for TreeView / UserForm code.
+    # them. Delegates to the same helper `precheck()` uses so the two
+    # entry points stay in sync.
     import re as _re
-    _mscomctl_pat = _re.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re.IGNORECASE)
-    # `MSForms.X` is the only spelling we auto-trigger on; the bare
-    # `UserForm` / `CommandButton` names are too generic.
-    _msforms_pat = _re.compile(r"\bMSForms\b", _re.IGNORECASE)
     file_contents: dict[Path, str] = {}
     for path in paths:
         path = Path(path)
         with open(path, "r", encoding="latin-1") as f:
             file_contents[path] = f.read()
-    if any(
-        Path(p).suffix.lower() == ".frm" and _mscomctl_pat.search(c)
-        for p, c in file_contents.items()
-    ):
-        mscomctl_path = ROOT / "src" / "models" / "mscomctl.json"
-        if mscomctl_path.is_file():
-            config.load_model(str(mscomctl_path))
-    if any(_msforms_pat.search(c) for c in file_contents.values()):
-        msforms_path = ROOT / "src" / "models" / "msforms.json"
-        if msforms_path.is_file():
-            config.load_model(str(msforms_path))
+    from src.api import apply_auto_layers
+    apply_auto_layers(
+        config,
+        [(str(p), c) for p, c in file_contents.items()],
+    )
 
     analyzer = Analyzer(config)
     lexer_errors: list[Any] = []

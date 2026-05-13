@@ -1,0 +1,66 @@
+{
+  "_doc": "Microsoft Shell Controls and Automation (shell32.dll, ProgID `Shell.Application`) — Explorer-style folder/file automation. Auto-layers on any source mentioning the ProgID. NOTE: all class names are prefixed with `Shell.` (the full ProgID style) rather than bare `Application`/`Folder`/`FolderItem` to avoid colliding with Excel/Word/Access/Outlook's own `Application` / `Folder` classes — a name collision there would clobber `Application.Run`, `Application.Worksheets`, etc.",
+  "globals": {
+    "Shell": { "type": "Variant" }
+  },
+  "classes": {
+    "Shell.Application": {
+      "type": "Class",
+      "members": {
+        "Name": { "type": "String" },
+        "Parent": { "type": "Object" },
+        "BrowseForFolder": { "type": "Function", "returns": "Shell.Folder", "min_args": 2, "max_args": 4 },
+        "NameSpace": { "type": "Function", "returns": "Shell.Folder", "min_args": 1, "max_args": 1 },
+        "Open": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "Explore": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "ShellExecute": { "type": "Sub", "min_args": 1, "max_args": 5 },
+        "Windows": { "type": "Function", "returns": "Object", "min_args": 0, "max_args": 0 },
+        "Run": { "type": "Sub", "min_args": 1, "max_args": 4 }
+      }
+    },
+    "Shell.Folder": {
+      "type": "Class",
+      "members": {
+        "Title": { "type": "String" },
+        "Application": { "type": "Object" },
+        "ParentFolder": { "type": "Shell.Folder" },
+        "Self": { "type": "Shell.FolderItem" },
+        "Items": { "type": "Function", "returns": "Shell.FolderItems", "min_args": 0, "max_args": 0 },
+        "ParseName": { "type": "Function", "returns": "Shell.FolderItem", "min_args": 1, "max_args": 1 },
+        "GetDetailsOf": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+        "CopyHere": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "MoveHere": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "NewFolder": { "type": "Sub", "min_args": 1, "max_args": 2 }
+      }
+    },
+    "Shell.FolderItems": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Shell.FolderItem", "min_args": 0, "max_args": 1 },
+        "Application": { "type": "Object" },
+        "Parent": { "type": "Object" }
+      }
+    },
+    "Shell.FolderItem": {
+      "type": "Class",
+      "members": {
+        "Name": { "type": "String" },
+        "Path": { "type": "String" },
+        "Size": { "type": "Variant" },
+        "Type": { "type": "String" },
+        "ModifyDate": { "type": "Date" },
+        "IsFolder": { "type": "Boolean" },
+        "IsLink": { "type": "Boolean" },
+        "IsFileSystem": { "type": "Boolean" },
+        "IsBrowsable": { "type": "Boolean" },
+        "GetFolder": { "type": "Shell.Folder" },
+        "GetLink": { "type": "Object" },
+        "Application": { "type": "Object" },
+        "Parent": { "type": "Object" },
+        "InvokeVerb": { "type": "Sub", "min_args": 0, "max_args": 1 },
+        "Verbs": { "type": "Function", "returns": "Object", "min_args": 0, "max_args": 0 }
+      }
+    }
+  }
+}

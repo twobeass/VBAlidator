@@ -138,6 +138,51 @@ def _autodetect_vba_model(source) -> Path | None:
     return None
 
 
+# Auto-layer table: which companion model to layer when the scan set
+# references it. Each entry is (model filename, regex to look for in
+# any source file, restrict-to-extension or None for "any file").
+#
+# Pattern design note: we trigger on the *namespace* name (`MSForms`,
+# `Scripting`, …) rather than the bare class names (`Dictionary`,
+# `UserForm`, …) because the unqualified class names are too generic —
+# they clash with project-internal identifiers in real libraries.
+import re as _re_aux
+
+_AUTO_LAYER_RULES: list[tuple[str, "_re_aux.Pattern[str]", str | None]] = [
+    ("mscomctl.json", _re_aux.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re_aux.IGNORECASE), ".frm"),
+    ("msforms.json", _re_aux.compile(r"\bMSForms\b", _re_aux.IGNORECASE), None),
+    # ProgID-style auto-layers — match the namespace prefix of CreateObject
+    # strings or `As Scripting.X` declarations. Spelled out verbatim because
+    # VBA is case-insensitive but real-world capitalisation drifts.
+    ("scripting.json", _re_aux.compile(r"\bScripting\.(?:Dictionary|FileSystemObject)\b", _re_aux.IGNORECASE), None),
+    ("vbscript_regexp.json", _re_aux.compile(r"\bVBScript\.Reg[Ee]xp\b", _re_aux.IGNORECASE), None),
+    ("wscript_shell.json", _re_aux.compile(r"\bWScript\.Shell\b", _re_aux.IGNORECASE), None),
+    ("shell_application.json", _re_aux.compile(r"\bShell\.Application\b", _re_aux.IGNORECASE), None),
+]
+
+
+def apply_auto_layers(config: Config, files: list[tuple[str, str]]) -> list[str]:
+    """Layer companion models on top of the standard / host model when
+    the scan set references them. Returns the list of layered model
+    filenames (mostly for logging / tests). Shared between `precheck()`
+    and the test conftest pipeline so the two stay in sync."""
+    models_dir = Path(__file__).resolve().parent / "models"
+    layered: list[str] = []
+    for model_name, pat, ext_filter in _AUTO_LAYER_RULES:
+        candidates = files
+        if ext_filter is not None:
+            candidates = [
+                (fn, ct) for fn, ct in files
+                if os.path.splitext(fn)[1].lower() == ext_filter
+            ]
+        if any(pat.search(content) for _, content in candidates):
+            path = models_dir / model_name
+            if path.is_file():
+                config.load_model(str(path))
+                layered.append(model_name)
+    return layered
+
+
 def _load_host_model(config: Config, host: str | None) -> bool:
     """Load `models/<host>.json` if it exists. Return True if loaded.
     Silent no-op when host is None or the file does not exist (the user
@@ -203,24 +248,7 @@ def precheck(
 
     files, n_files = _iter_input_files(source)
 
-    # Auto-layer companion models when the scan set references them, so
-    # users don't need to spell out `--host mscomctl` / `--host msforms`
-    # alongside their Excel/Word host.
-    import re as _re_aux
-    _mscomctl_pat = _re_aux.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re_aux.IGNORECASE)
-    _msforms_pat = _re_aux.compile(r"\bMSForms\b", _re_aux.IGNORECASE)
-    if any(
-        os.path.splitext(filename)[1].lower() == ".frm"
-        and _mscomctl_pat.search(content)
-        for filename, content in files
-    ):
-        mscomctl_path = Path(__file__).resolve().parent / "models" / "mscomctl.json"
-        if mscomctl_path.is_file():
-            config.load_model(str(mscomctl_path))
-    if any(_msforms_pat.search(content) for _, content in files):
-        msforms_path = Path(__file__).resolve().parent / "models" / "msforms.json"
-        if msforms_path.is_file():
-            config.load_model(str(msforms_path))
+    apply_auto_layers(config, files)
 
     analyzer = Analyzer(config)
 
