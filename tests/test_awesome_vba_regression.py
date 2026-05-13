@@ -63,17 +63,16 @@ BASELINE: dict[str, tuple[int, str]] = {
         "not an indexed element access).",
     ),
     "stdVBA-master": (
-        9,
-        "Down from 180 via --host excel + library namespaces + stdError "
-        "fixture + MSForms 2.0 host model + Enum<->Long ByRef compat + "
-        "suppressing Sub-style implicit-call + Array/Choose/Switch as "
-        "ParamArray + Variant→Object/Class→IUnknown ByRef compat + Enum "
-        "members as kind='EnumItem' + Erase/ReDim member-chain and "
-        "With-block leading-dot + `error` as identifier + lexer line-"
-        "continuation trailing whitespace. Remaining ≈9 are deep "
-        "analyzer cases (Dim-inside-loop-scope, default-property Item, "
-        "member-on-unknown-type) and ~5 genuine upstream typos earmarked "
-        "for vbatest Iter-5.",
+        5,
+        "Down from 180. All remaining 5 are **genuine upstream bugs**, "
+        "not analyzer false-positives: 3× typos in stdImage.cls "
+        "(`lImageSikze` declared / `lImageSize` used; `stWepY` / `stepY`), "
+        "1× `On Error GoTo stdErrorWrapper_ErrorOccurred` in "
+        "stdCallback.cls::RunEx pointing at a label that doesn't exist "
+        "(only `errorinrtccallbyname` is declared), and 1× default-"
+        "property `Item` resolution gap on `acc.children(idx)` in "
+        "stdAcc.cls (the only remaining analyzer FP, the abstract "
+        "Collection→Item indirection is iter-8 territory).",
     ),
 }
 

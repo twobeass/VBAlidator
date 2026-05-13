@@ -326,3 +326,53 @@ End Function
     # the label-tagged recovery branch without hanging.
     assert len(module.procedures) == 1
     assert module.procedures[0].body, "Function body must not be empty"
+
+
+def test_dim_inside_do_loop_visible_in_bottom_tested_condition(run_source):
+    """A `Dim` declared inside a `Do ... Loop While|Until <cond>` body
+    must be visible to the bottom-tested condition. The analyzer now
+    walks the body before the condition for bottom-tested loops.
+    Regression for stdReg's `Loop While result = ERROR_SUCCESS`."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    Dim i As Long: i = -1
+    Do
+        i = i + 1
+        Dim result As Long: result = i
+    Loop While result = 0
+End Sub
+"""
+    result = run_source(code)
+    name_errors = [
+        e for e in result.errors
+        if "Undefined identifier 'result'" in (e.get("message") or "")
+    ]
+    assert not name_errors, (
+        f"Dim inside bottom-tested loop must be visible to the trailing "
+        f"condition. Got: {result.errors!r}"
+    )
+
+
+def test_unreachable_code_is_warning_not_error(run_source):
+    """`Unreachable code` is style-grade — not a compile error in any
+    VBA implementation. Severity must be `warning` so the awesome_vba
+    regression suite (which only counts hard errors) doesn't trip on
+    upstream dead-code defensiveness like stdFiber/stdLambda."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Function F() As Long
+    F = 1
+    Exit Function
+    Dim never As Long
+End Function
+"""
+    result = run_source(code)
+    unreach = [e for e in result.errors if "Unreachable" in (e.get("message") or "")]
+    assert unreach, "must still detect the unreachable line"
+    assert all(e.get("severity") == "warning" for e in unreach), (
+        f"Unreachable code must surface as warning, not error. "
+        f"Got severities: {[e.get('severity') for e in unreach]!r}"
+    )
