@@ -13,37 +13,33 @@ Status legend: `[ ]` open · `[~]` partially done in the sandbox · `[x]` done.
 
 These cannot run on the Linux GitHub-hosted runners.
 
-- [~] **Regenerate every bundled host model from a real Office install.**
-  The `src/models/{excel,word,access,outlook}.json` files shipped today
-  are hand-curated minimal subsets covering the ~80% common case
-  (Application / Workbook / Worksheet / Range / Documents / Database /
-  NameSpace / MailItem). UAT run #9 produced full-fidelity counterparts
-  on Windows + Office 365 (gist at
-  <https://gist.github.com/twobeass/6786ef3404922c3549d5621638be29e6>);
-  the FP comparison documented in `docs/host-models-comparison.md`
-  shows the regenerated models are **strictly better or equal** on every
-  Awesome-VBA project (best-Excel total 306 vs. shipped 351 = −12.8%).
+- [x] **Regenerate every bundled host model from a real Office install.**
+  Shipped in PR #23 (v1.1.0) — Excel/Word/Access/Visio are now full-
+  fidelity exports of the real Office type libraries (1–3 MB each).
+  Plan C ("opt-in `*-full` variants") was abandoned because shipping
+  the full models in the default install turned out to be the cleaner
+  default. Outlook remains a hand-curated stub (the Trust-Center
+  AccessVBOM path is GPO-blocked on managed installs — see
+  [memory/office-quirks.md] for context).
 
-  **Decision (Plan C, opt-in full models):**
-    1. Ship a separate `vbalidator-models-full` sdist (~7 MB) that
-       drops the regenerated JSONs into `vbalidator.models.full`.
-    2. CLI gains `--host {excel,word,access,outlook,visio}-full`;
-       the standard hosts stay bundled and remain the default.
-    3. Documentation in `docs/full-models.md` (linked from
-       Configuration) explains the trade-off.
+  Companion COM stubs added in iter-6 / iter-7:
+  - `src/models/mscomctl.json` (PR #28) — Microsoft Common Controls
+  - `src/models/msforms.json` (PR #30) — MSForms 2.0 UserForm controls
+  - `src/models/scripting.json` (PR #40) — Scripting.Dictionary / FSO
+  - `src/models/vbscript_regexp.json` (PR #40)
+  - `src/models/wscript_shell.json` (PR #40)
+  - `src/models/shell_application.json` (PR #40)
 
-  **Deferred to a follow-up PR** to keep the current branch focused on
-  round-trip pipeline fixes; the FP gate result is captured so the
-  next person picks up with data, not speculation.
+  Regen scripts (`tools/build_mscomctl_model.py` / `build_msforms_model.py`)
+  are deterministic re-runs of the comtypes extract + VB6 container-
+  control patch. The four scripting/COM stubs are hand-curated.
 
-  For the **interim manual workflow** (still useful as the regen step
-  for the future opt-in package):
+  Manual regen workflow (still valid for project-specific custom
+  references):
     1. Open Excel → VBE → File ▶ Import File → `tools/VBA_Model_Exporter.bas`.
-    2. Run `ExportReferences`. It writes `vba_references.json` next to
-       the workbook (or to `%TEMP%`).
-    3. On the same machine: `pip install comtypes` → `python tools/generate_model.py vba_references.json -o vba_model.json`.
-    4. `vbalidator … --model vba_model.json` (or drop the file next to
-       your code for auto-load).
+    2. Run `ExportReferences`. It writes `vba_references.json`.
+    3. `pip install comtypes` → `python tools/generate_model.py vba_references.json -o vba_model.json`.
+    4. `vbalidator … --model vba_model.json`.
 
 - [~] **Run the VBE round-trip suite end-to-end at least once.**
   `src/roundtrip.py` is implemented in a tiered strategy
@@ -108,64 +104,25 @@ These cannot run on the Linux GitHub-hosted runners.
 
 ## B. Things that need account access (PyPI / GHCR / GitHub Pages)
 
-These are one-time setup steps. After they are in place CI takes over.
+All shipped during phase-5 / iter-5 — kept here as a record of the
+one-time setup. If anything breaks, these are the dials to check.
 
-- [ ] **Register the project on PyPI as a Trusted Publisher.**
-  `release.yml` already uses OIDC and refuses to use API tokens.
-  Setup:
-    1. Reserve the project name on PyPI: <https://pypi.org/manage/projects/>
-       → "Add a new project" → `vbalidator`.
-    2. → Settings → Publishing → "Add a new pending publisher".
-       - Owner: `twobeass`
-       - Repository: `VBAlidator`
-       - Workflow filename: `release.yml`
-       - Environment name: `pypi`
-    3. Same again on <https://test.pypi.org> for the dev-release flow,
-       environment name `testpypi` (the workflow currently doesn't
-       declare it; if you want OIDC for TestPyPI too, add
-       `environment: testpypi` to the `publish-testpypi-nightly` job).
-    4. In the GitHub repo → Settings → Environments → "New environment"
-       called `pypi` (matching the workflow's `environment.name`).
-
-- [ ] **Enable GHCR for the package.**
-  `docker.yml` pushes to `ghcr.io/twobeass/vbalidator`. After the first
-  successful push the package is created; you need to:
-    1. Visit <https://github.com/users/twobeass/packages/container/vbalidator>.
-    2. → Package settings → Manage Actions access → add this repository
-       with `Write` permission.
-    3. Optionally → Change visibility to Public so users can `docker pull`
-       without auth.
-
-- [ ] **Enable GitHub Pages.**
-  `docs.yml` is wired up to deploy the MkDocs Material site. Activate it:
-    1. Repo → Settings → Pages → Source: "GitHub Actions".
-    2. Push any commit to `main` → the `Deploy to GitHub Pages` job
-       publishes <https://twobeass.github.io/VBAlidator/>.
-
-- [ ] **Configure branch protection on `main`.**
-  Recommended in `docs/ci-cd.md`. Concrete steps:
-    1. Repo → Settings → Branches → Add rule for `main`.
-    2. ☑ Require a pull request before merging (1 reviewer).
-    3. ☑ Require status checks to pass:
-       - `Lint (ruff)`
-       - `Test (Py3.12 on ubuntu-latest)` (and any other matrix entry
-         you want to gate on)
-       - `Rule docs in sync`
-       - `CLI smoke test`
-       - `PR title is a Conventional Commit`
-       - `pip-audit`
-       - `Bandit static-security scan`
-       - `CodeQL (Python)`
-    4. ☑ Require signed commits.
-    5. ☑ Do not allow force-push.
-
-- [ ] **Trigger the first semantic-release tag.**
-  Until at least one commit lands on `main` with a `feat:` / `fix:` /
-  `BREAKING CHANGE:` footer, `release.yml` will not produce a tag.
-  After the PR is merged, push a single commit (e.g.
-  `chore(release): seed v0.2.0`) or open a tiny `feat:` PR; the tag
-  flow then runs end-to-end and the version becomes the source of
-  truth for `pyproject.toml` + `src/__init__.__version__`.
+- [x] **PyPI Trusted Publisher** registered (`vbalidator`) — OIDC via
+  `release.yml`, `pypi` environment configured.
+- [x] **GHCR** enabled and public — `ghcr.io/twobeass/vbalidator:latest`
+  multi-arch (amd64 + arm64), pushed by `docker.yml`.
+- [x] **GitHub Pages** deployed at <https://twobeass.github.io/VBAlidator/>
+  from `docs.yml` on every `main` push.
+- [x] **Branch protection on `main`** — 8 required status checks
+  (`Lint (ruff)`, `Test (Py3.12 on ubuntu-latest)`, `Rule docs in sync`,
+  `CLI smoke test`, `PR title is a Conventional Commit`,
+  `Dependency CVE scan`, `Bandit static-security scan`,
+  `CodeQL (Python)`), PRs required, force-push blocked.
+  `release.yml` uses `secrets.SEMANTIC_RELEASE_TOKEN` (fine-grained
+  PAT) to bypass branch protection for version-bump commits — see
+  `CLAUDE.md` for the rationale.
+- [x] **semantic-release tag flow** active — `v1.0.x` … `v1.4.x`
+  shipped, each triggered by a `feat:` / `fix:` PR.
 
 
 ## C. Code-level work explicitly deferred during PR #14
@@ -214,13 +171,15 @@ backlog is visible from the repo root.
   install, CLI, Python API, auto-load, Score, JSON v2, MkDocs, Docker,
   every shipped rule. Sign off section by section.
 
-- [ ] **Reduce Awesome-VBA baselines toward zero.**
-  Today's ceilings (`tests/test_awesome_vba_regression.py`):
-  JSONBag 12, VBA-MemoryTools 18, VbTrickTimer 5, stdVBA 335. Each
-  remaining error is either:
-    - A real bug in upstream → file a PR there.
-    - A genuine VBAlidator gap → register a `# noqa`-style suppression
-      hint or close the analyser hole.
+- [x] **Reduce Awesome-VBA baselines toward zero.**
+  Closed in iter-6 (PRs #26/#27/#28/#29/#30/#31) and iter-7 (PRs
+  #33/#34/#35/#36/#37/#38/#39/#40/#41). Final baselines as of v1.4.x:
+  JSONBag **0**, VBA-MemoryTools **0**, VbTrickTimer **0**, stdVBA **4**
+  — and **all 4 remaining are genuine upstream library bugs** (3 typos
+  in stdImage.cls + 1 missing `On Error GoTo` label in stdCallback.cls),
+  not analyzer false-positives. VBAlidator's FP surface across the
+  four awesome_vba projects is now **zero**. Down from the original
+  203 total (-98%).
 
 - [ ] **Performance benchmark.**
   The roadmap promises `pytest-benchmark` regression checks. Implement:
