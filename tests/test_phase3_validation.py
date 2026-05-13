@@ -645,3 +645,49 @@ End Sub
     assert not hard, (
         f"Statement-level Sub-style calls must stay valid. Got: {hard!r}"
     )
+
+
+def test_variant_arg_compatible_with_object_byref_param(run_source):
+    """`Variant` can hold any object reference, so passing it to an
+    `Object` ByRef parameter is valid VBA — the runtime unwraps the
+    contained reference. Regression for stdCallback's `ObjPtr(data)`
+    where `data` is Variant."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Public Declare PtrSafe Function ObjPtrAlias Lib "kernel32" Alias "RtlMoveMemory" (ByRef Ptr As Object, ByRef Source As Any, ByVal Len As LongPtr)
+
+Sub S()
+    Dim data As Variant
+    Dim source As Long
+    Call ObjPtrAlias(data, source, 4)
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"Variant must accept Object ByRef param. Got: {mismatches!r}"
+    )
+
+
+def test_class_arg_compatible_with_iunknown_byref_param(run_source):
+    """Every VBA class implements `IUnknown` implicitly. Passing a
+    class-typed variable to a `ByRef obj As IUnknown` parameter is
+    therefore valid — the canonical stdCOM-style COM-interop pattern."""
+    iface = """
+VERSION 1.0 CLASS
+Attribute VB_Name = "stdCOM"
+Option Explicit
+Sub RevokeActiveObjectEx(ByRef obj As IUnknown, ByVal cookie As Long)
+End Sub
+
+Sub Class_Terminate()
+    Call RevokeActiveObjectEx(Me, 0)
+End Sub
+"""
+    result = run_source(iface, module_type="Class")
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"Class-typed variable must accept IUnknown ByRef param. "
+        f"Got: {mismatches!r}"
+    )

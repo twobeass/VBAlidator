@@ -1985,6 +1985,25 @@ class Analyzer:
                                      compatible = True
 
                              # RELAXATION:
+                             # `Variant` can hold any object reference,
+                             # so passing a Variant to an `Object`/class
+                             # ByRef parameter is valid VBA — the runtime
+                             # unwraps the contained reference. Symmetric
+                             # to the Object→class relaxation above.
+                             if not compatible and a_lower == 'variant':
+                                 if p_lower == 'object' or self._is_class_type(param_type):
+                                     compatible = True
+
+                             # RELAXATION:
+                             # Every VBA class implements `IUnknown`
+                             # implicitly. A class-typed argument is
+                             # therefore compatible with a ByRef IUnknown
+                             # parameter (the canonical stdCOM-style
+                             # COM-interop pattern).
+                             if not compatible and p_lower == 'iunknown' and self._is_class_type(arg_type):
+                                 compatible = True
+
+                             # RELAXATION:
                              # Enums are Long under the hood. Real VBA
                              # accepts both directions:
                              #   `Dim x As MyEnum: Inner x`  → `ByRef p As Long`
@@ -2243,6 +2262,25 @@ class Analyzer:
                 if m_key.lower() == name.lower():
                     return m_val
         return None
+
+    def _is_class_type(self, type_name):
+        """True if `type_name` names a user-defined Class (scanned `.cls`)
+        or a Class from a loaded host model. Used to permit `Variant`→
+        class and class→`IUnknown` ByRef compatibility, mirroring VBA's
+        implicit IUnknown inheritance."""
+        if not type_name or not isinstance(type_name, str):
+            return False
+        low = type_name.lower()
+        # Scanned source: any module with module_type='Class' (or 'Form')
+        # registers itself with that name; we cross-check via the existing
+        # `modules` collection.
+        for mod in self.modules:
+            if mod.name.lower() == low and mod.module_type in ("Class", "Form"):
+                return True
+        # Host-model class.
+        if self.config.get_class(type_name):
+            return True
+        return False
 
     def _is_enum_type(self, type_name):
         """True if `type_name` names an Enum — either one declared in the
