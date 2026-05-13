@@ -4,7 +4,7 @@ class Node:
     pass
 
 class VariableNode(Node):
-    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False, mechanism='ByRef', is_const=False):
+    def __init__(self, name, type_name, scope='Private', is_optional=False, is_paramarray=False, mechanism='ByRef', is_const=False, is_enum_member=False):
         self.name = name
         self.type_name = type_name
         self.scope = scope # Dim (Local), Private, Public, Global
@@ -12,6 +12,11 @@ class VariableNode(Node):
         self.is_paramarray = is_paramarray
         self.mechanism = mechanism
         self.is_const = is_const
+        # `parse_enum` reuses VariableNode for each member; this flag lets
+        # the analyzer register them with kind='EnumItem' (compile-time
+        # constants, valid as `Const X = MyEnum.Member` RHS) rather than
+        # generic Variable.
+        self.is_enum_member = is_enum_member
 
     def __repr__(self):
         decl = "Const " if self.is_const else ""
@@ -1401,7 +1406,7 @@ class VBAParser:
                 # We register the Enum Type in module.types
                 # AND we register the members as module-level variables (Consts)
 
-                var = VariableNode(member_name, 'Long', scope) # Enum members are Long
+                var = VariableNode(member_name, 'Long', scope, is_enum_member=True) # Enum members are Long
                 module.variables.append(var)
                 udt.members.append(var)
 
