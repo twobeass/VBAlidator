@@ -67,13 +67,30 @@ def run_pipeline_on_files(
         if model_path.is_file():
             config.load_model(str(model_path))
 
+    # Pre-scan: any `.frm` referencing the Microsoft Common Controls library
+    # auto-layers `models/mscomctl.json` so callers don't need to spell out
+    # `--host mscomctl` for a TreeView / ListView / Toolbar form.
+    import re as _re
+    _mscomctl_pat = _re.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re.IGNORECASE)
+    file_contents: dict[Path, str] = {}
+    for path in paths:
+        path = Path(path)
+        with open(path, "r", encoding="latin-1") as f:
+            file_contents[path] = f.read()
+    if any(
+        Path(p).suffix.lower() == ".frm" and _mscomctl_pat.search(c)
+        for p, c in file_contents.items()
+    ):
+        mscomctl_path = ROOT / "src" / "models" / "mscomctl.json"
+        if mscomctl_path.is_file():
+            config.load_model(str(mscomctl_path))
+
     analyzer = Analyzer(config)
     lexer_errors: list[Any] = []
 
     for path in paths:
         path = Path(path)
-        with open(path, "r", encoding="latin-1") as f:
-            content = f.read()
+        content = file_contents[path]
 
         ext = path.suffix.lower()
         module_type = _module_type_for(path)
@@ -83,7 +100,6 @@ def run_pipeline_on_files(
         if ext == ".frm":
             fp = FormParser()
             controls = fp.parse(content)
-            import re as _re
             match = _re.search(r"Attribute\s+VB_Name", content)
             if match:
                 code_content = content[match.start():]
