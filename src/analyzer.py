@@ -1740,12 +1740,21 @@ class Analyzer:
                             last_resolved_type = inferred_ret_type
                             last_resolved_kind = 'Expression'
                         elif last_resolved_type.endswith('()'):
-                             last_resolved_type = last_resolved_type[:-2]
-                             # Array Element Access -> Preserves Variable-ness if base was Variable
-                             if last_resolved_kind == 'Variable':
-                                 last_resolved_kind = 'Variable'
+                             # `arr()` with empty parens is VBA's explicit
+                             # pass-whole-array syntax, not an indexed access —
+                             # the type stays the array, not the element. Real
+                             # element access always has at least one index
+                             # token inside the parens.
+                             if not sub_tokens:
+                                 # last_resolved_type and kind unchanged
+                                 pass
                              else:
-                                 last_resolved_kind = 'Expression'
+                                 last_resolved_type = last_resolved_type[:-2]
+                                 # Array Element Access -> Preserves Variable-ness if base was Variable
+                                 if last_resolved_kind == 'Variable':
+                                     last_resolved_kind = 'Variable'
+                                 else:
+                                     last_resolved_kind = 'Expression'
                         else:
                             # Default Property Logic (e.g. Selection(1) -> Selection.Item(1))
                             # If the type is an object and has an "Item" member, resolve to that type.
@@ -1930,7 +1939,11 @@ class Analyzer:
                     param_type = param.type_name
                     param_name = param.name
 
-                if param_type.lower() == 'any':
+                # `As Any` (and the array form `As Any()`) is VBA's
+                # universally-compatible sentinel in `Declare` statements —
+                # callers may pass any concrete type. Short-circuit the
+                # ByRef strict-type check for either form.
+                if param_type.lower() in ('any', 'any()'):
                     continue
 
                 if mech == 'ByRef':

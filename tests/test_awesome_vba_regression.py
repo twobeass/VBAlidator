@@ -56,10 +56,11 @@ BASELINE: dict[str, tuple[int, str]] = {
         "rule flags).",
     ),
     "VbTrickTimer-master": (
-        5,
-        "5× `Any()` ↔ concrete-array type-mismatch in Declare-statement "
-        "ByRef params — the analyzer doesn't treat `Any()` as the "
-        "compatible-with-anything sentinel the VBA compiler does.",
+        0,
+        "Clean — fixed by treating `As Any` / `As Any()` Declare params as "
+        "universally-compatible sentinels, plus letting `arr()` with empty "
+        "parens keep the array type (VBA's explicit pass-whole-array form, "
+        "not an indexed element access).",
     ),
     "stdVBA-master": (
         99,
