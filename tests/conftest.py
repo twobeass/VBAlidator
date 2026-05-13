@@ -67,11 +67,14 @@ def run_pipeline_on_files(
         if model_path.is_file():
             config.load_model(str(model_path))
 
-    # Pre-scan: any `.frm` referencing the Microsoft Common Controls library
-    # auto-layers `models/mscomctl.json` so callers don't need to spell out
-    # `--host mscomctl` for a TreeView / ListView / Toolbar form.
+    # Pre-scan: auto-layer companion models when the scan set references
+    # them, so callers don't need to spell out `--host mscomctl` /
+    # `--host msforms` for TreeView / UserForm code.
     import re as _re
     _mscomctl_pat = _re.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re.IGNORECASE)
+    # `MSForms.X` is the only spelling we auto-trigger on; the bare
+    # `UserForm` / `CommandButton` names are too generic.
+    _msforms_pat = _re.compile(r"\bMSForms\b", _re.IGNORECASE)
     file_contents: dict[Path, str] = {}
     for path in paths:
         path = Path(path)
@@ -84,6 +87,10 @@ def run_pipeline_on_files(
         mscomctl_path = ROOT / "src" / "models" / "mscomctl.json"
         if mscomctl_path.is_file():
             config.load_model(str(mscomctl_path))
+    if any(_msforms_pat.search(c) for c in file_contents.values()):
+        msforms_path = ROOT / "src" / "models" / "msforms.json"
+        if msforms_path.is_file():
+            config.load_model(str(msforms_path))
 
     analyzer = Analyzer(config)
     lexer_errors: list[Any] = []

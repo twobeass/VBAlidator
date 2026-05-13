@@ -338,6 +338,88 @@ def test_mscomctl_autolayer_explicit_host_choice(tmp_path):
     )
 
 
+# ---- MSForms auto-layer -----------------------------------------------------
+
+
+def test_msforms_autolayers_when_source_references_namespace(tmp_path):
+    """A `.cls` using `TypeOf ctrl Is MSForms.UserForm` must auto-layer
+    `models/msforms.json` so the namespace lookup resolves — without
+    requiring `--host msforms` explicitly. Regression for stdVBA-master's
+    `stdUIElement.cls`."""
+    cls = tmp_path / "C.cls"
+    cls.write_text(
+        "VERSION 1.0 CLASS\n"
+        'Attribute VB_Name = "C"\n'
+        "Option Explicit\n"
+        "Sub S(ctrl As Object)\n"
+        "    If TypeOf ctrl Is MSForms.UserForm Then\n"
+        "    End If\n"
+        "    If TypeOf ctrl Is MSForms.CommandButton Then\n"
+        "    End If\n"
+        "    If TypeOf ctrl Is MSForms.TextBox Then\n"
+        "    End If\n"
+        "End Sub\n",
+        encoding="latin-1",
+    )
+    result = precheck(cls)
+    msforms_errors = [e for e in result.errors if "MSForms" in e.get("message", "")]
+    assert not msforms_errors, (
+        f"`MSForms.<Class>` references must resolve via auto-layered "
+        f"msforms model. Got: {result.errors!r}"
+    )
+
+
+def test_msforms_control_base_members_resolve(tmp_path):
+    """The abstract `MSForms.Control` base picks up the VB6 container-
+    control member set (`Caption`, `Left`, `Top`, `Width`, `Height`, …)
+    so library code like `this.Control.Caption` resolves. Regression for
+    stdVBA-master's `stdUIElement.cls::Caption` property."""
+    cls = tmp_path / "C.cls"
+    cls.write_text(
+        "VERSION 1.0 CLASS\n"
+        'Attribute VB_Name = "C"\n'
+        "Option Explicit\n"
+        "Private ctrl As MSForms.Control\n"
+        "Sub S()\n"
+        "    Dim s As String\n"
+        "    s = ctrl.Caption\n"
+        "    ctrl.Left = 10\n"
+        "    ctrl.Top = 20\n"
+        "    ctrl.Width = 100\n"
+        "    ctrl.Height = 50\n"
+        "End Sub\n",
+        encoding="latin-1",
+    )
+    result = precheck(cls)
+    member_errors = [
+        e for e in result.errors
+        if "not found in type 'MSForms.Control'" in e.get("message", "")
+    ]
+    assert not member_errors, (
+        f"MSForms.Control must carry VB6 base members. Got: {result.errors!r}"
+    )
+
+
+def test_msforms_autolayer_explicit_host_choice(tmp_path):
+    """`--host msforms` is a valid CLI choice for `.bas` modules that use
+    UserForms via late binding (no `MSForms.` prefix to trigger the
+    auto-layer)."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S(btn As CommandButton)\n"
+        "    btn.Caption = \"Click\"\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="msforms")
+    member_errors = [e for e in result.errors if "Caption" in e.get("message", "")]
+    assert not member_errors, (
+        f"With --host=msforms, CommandButton.Caption must resolve. "
+        f"Errors: {result.errors!r}"
+    )
+
+
 # ---- Defines -----------------------------------------------------------
 
 
@@ -381,7 +463,7 @@ End Sub
 # ---- Models JSON well-formed --------------------------------------------
 
 
-@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook", "visio", "mscomctl"])
+@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook", "visio", "mscomctl", "msforms"])
 def test_host_model_json_loads(host):
     """Every shipped host model must be valid JSON with the expected sections."""
     import json
