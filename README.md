@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 VBAlidator parses `.bas` / `.cls` / `.frm` files through a real
-lexer / preprocessor / parser / analyzer pipeline, applies **35
+lexer / preprocessor / parser / analyzer pipeline, applies **41
 documented rules** (see [the catalogue](docs/rules/index.md)), and
 returns a verdict CI pipelines and AI agents can act on directly.
 
@@ -108,11 +108,32 @@ Compile errors VBE itself reports come back with
 hosts the call degrades gracefully to a single info-level notice
 instead of crashing.
 
-## Bundled host models
+## Bundled host models & auto-layering
 
-`--host excel|word|access|outlook` auto-loads the matching object
-model from `src/models/`. Cover ~600 host-specific globals / classes
-out of the box — no need to run a COM exporter for the common case.
+`--host excel|word|access|outlook|visio` auto-loads the matching Office
+host model from `src/models/`. Excel/Word/Access/Visio are
+**full-fidelity** exports of the real Office type libraries
+(1–3 MB each, ~1000 classes apiece, ~5000 globals/classes in
+Excel alone); Outlook is a hand-curated stub (the Trust-Center
+AccessVBOM path is GPO-blocked on managed installs).
+
+In addition, six companion stubs **auto-layer** without an explicit
+`--host` flag whenever any scanned file mentions their ProgID /
+namespace:
+
+| Stub | Triggers on | Top classes |
+|---|---|---|
+| `mscomctl` | `.frm` referencing `ComctlLib` | TreeView, ListView, Toolbar, ProgressBar |
+| `msforms` | source mentioning `MSForms.` | UserForm, CommandButton, TextBox, Frame |
+| `scripting` | `Scripting.Dictionary` / `Scripting.FileSystemObject` | Dictionary, FSO, Drive, Folder, File, TextStream |
+| `vbscript_regexp` | `VBScript.RegExp` | RegExp, Match, MatchCollection, SubMatches |
+| `wscript_shell` | `WScript.Shell` | Shell, WshExec, WshEnvironment |
+| `shell_application` | `Shell.Application` | Shell.Application, Shell.Folder, Shell.FolderItem |
+
+So `--host excel` covers the vast majority of real-world spreadsheet
+VBA — TreeView/UserForm/Dictionary/RegExp code resolves
+automatically. Run `vbalidator --help` for the full `--host` choice
+list.
 
 ## Documentation
 
@@ -128,7 +149,7 @@ In-repo:
 - [Configuration](docs/Configuration.md) — host models, custom models,
   conditional-compilation defaults, heuristics
 - [Architecture](docs/Architecture.md) — pipeline internals
-- [Rule catalogue](docs/rules/index.md) — all 35 rules with examples
+- [Rule catalogue](docs/rules/index.md) — all 41 rules with examples
 - [CI / CD](docs/ci-cd.md) — workflows, release lifecycle, branch
   protection
 - [UAT walkthrough](docs/uat.md) — section-by-section human validation
@@ -143,7 +164,7 @@ In-repo:
 git clone https://github.com/twobeass/VBAlidator
 cd VBAlidator
 pip install -e ".[dev]"
-pytest                              # 148 tests
+pytest                              # 259 tests
 ruff check src tests                # lint
 python tools/generate_rule_docs.py  # refresh docs/rules/ after a rule change
 ```

@@ -1,17 +1,25 @@
 # Changelog
 
-All notable changes to this project are documented here. The format is
-loosely based on [Keep a Changelog] and the project follows
-[Conventional Commits] / Semver via `python-semantic-release`.
+The authoritative changelog is **GitHub Releases** —
+<https://github.com/twobeass/VBAlidator/releases> — regenerated on
+every `main` push by `python-semantic-release` from the Conventional
+Commit history. This file is kept only for the pre-release phase-0–5
+milestones; everything from `v1.0.0` onwards lives in the GitHub
+Release pages.
+
+The project follows [Conventional Commits] and Semver:
+- `feat:` → minor bump
+- `fix:` / `perf:` / `refactor:` → patch bump
+- `chore:` / `ci:` / `docs:` / `test:` / `style:` → no release
 
 [Keep a Changelog]: https://keepachangelog.com/en/1.1.0/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
-Once the first semantic-release tag lands this file is regenerated
-automatically from commit history. Until then it tracks the major
-milestones manually — see also [docs/changelog.md](docs/changelog.md).
+## v1.0.0 onwards
 
-## [Unreleased]
+See <https://github.com/twobeass/VBAlidator/releases>.
+
+## Pre-release — Phase 5: CI/CD pipeline + full doc overhaul (foundation for v1.0.x)
 
 ### Added — Phase 5: maximum CI/CD pipeline + full doc overhaul
 - `.github/workflows/release.yml` — python-semantic-release →
