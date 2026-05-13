@@ -145,10 +145,10 @@
     "IsError": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
     "IsMissing": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 },
 
-    "Array": { "type": "Function", "returns": "Variant", "min_args": 0, "max_args": 99 },
+    "Array": { "type": "Function", "returns": "Variant", "min_args": 0, "args": [{ "name": "ArgList", "type": "Variant", "is_paramarray": true }] },
     "GetObject": { "type": "Function", "returns": "Object", "min_args": 0, "max_args": 2 },
-    "Choose": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
-    "Switch": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
+    "Choose": { "type": "Function", "returns": "Variant", "min_args": 2, "args": [{ "name": "Index", "type": "Long" }, { "name": "Choice", "type": "Variant", "is_paramarray": true }] },
+    "Switch": { "type": "Function", "returns": "Variant", "min_args": 2, "args": [{ "name": "Pairs", "type": "Variant", "is_paramarray": true }] },
     "Partition": { "type": "Function", "returns": "String", "min_args": 4, "max_args": 4 },
     "RGB": { "type": "Function", "returns": "Long", "min_args": 3, "max_args": 3 },
     "QBColor": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 1 },
