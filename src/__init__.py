@@ -6,7 +6,7 @@ Public API
 >>> result = precheck("MyModule.bas", host="excel")
 >>> result.compile_safe, result.score
 """
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 from .api import PrecheckResult, precheck, precheck_source
 
