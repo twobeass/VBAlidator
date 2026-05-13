@@ -60,11 +60,14 @@ def main():
     )
     parser.add_argument(
         "--host",
-        choices=["excel", "word", "access", "outlook"],
-        help="Built-in host model to load (Excel/Word/Access/Outlook). "
+        choices=["excel", "word", "access", "outlook", "visio"],
+        help="Built-in host model to load (Excel/Word/Access/Outlook/Visio). "
              "When set, the bundled models/<host>.json is layered on top of "
              "the standard model so the user does not need to run the "
-             "VBA_Model_Exporter.bas first.",
+             "VBA_Model_Exporter.bas first. Excel/Word/Access/Visio are "
+             "full-fidelity models generated from real Office type libraries; "
+             "Outlook is a minimal hand-curated stub (the COM/TLB path is "
+             "GPO-blocked on most managed installs).",
     )
     parser.add_argument(
         "--output",
