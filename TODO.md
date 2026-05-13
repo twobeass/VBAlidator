@@ -237,8 +237,10 @@ backlog is visible from the repo root.
 
 ## E. One-line follow-ups for later PRs
 
-- [ ] Drop the `pytest>=7` floor in `pyproject.toml` to `>=8` once Py3.9
-      is removed from the matrix.
+- [x] **Drop the `pytest>=7` floor in `pyproject.toml` to `>=8` once Py3.9
+      is removed from the matrix.** *(shipped — Py3.9 EOL'd Oct 2025, fell
+      out of the windows-latest setup-python cache. Matrix is now
+      Py3.10–3.13, `requires-python = ">=3.10"`.)*
 - [ ] Consider a `--fix` dry-run flag now that the registry has
       `fix_hint` per rule — even without auto-fix, printing the hints
       next to each issue helps humans triage.

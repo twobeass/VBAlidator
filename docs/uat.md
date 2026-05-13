@@ -22,7 +22,7 @@ actual regression.
 | ☐ | Step | Expected |
 |---|------|----------|
 | ☐ | `git fetch origin && git switch claude/improve-vba-precompiler-3YcZp` | Clean checkout. |
-| ☐ | `python --version` | `>=3.9` (CI tests against 3.9–3.13). |
+| ☐ | `python --version` | `>=3.10` (CI tests against 3.10–3.13; Py3.9 was dropped after upstream EOL Oct 2025). |
 | ☐ | `python -m pip install -e ".[dev]"` | Installs `vbalidator` + `pytest` + `ruff`. |
 | ☐ | `vbalidator --version` *(if shipped)* or `python -c "import src; print(src.__version__)"` | Prints the current version (`0.1.1` until the first semantic-release tag). |
 
@@ -231,9 +231,9 @@ latest run on the branch.
 | ☐ | Workflow / job | Expected status |
 |---|----------------|-----------------|
 | ☐ | CI — `Lint (ruff)` | success |
-| ☐ | CI — `Test (Py3.9..3.13 on ubuntu-latest)` | 5/5 success |
-| ☐ | CI — `Test (Py3.9..3.13 on windows-latest)` | 5/5 success |
-| ☐ | CI — `Test (Py3.9..3.13 on macos-latest)` | 5/5 success |
+| ☐ | CI — `Test (Py3.10..3.13 on ubuntu-latest)` | 4/4 success |
+| ☐ | CI — `Test (Py3.10..3.13 on windows-latest)` | 4/4 success |
+| ☐ | CI — `Test (Py3.10..3.13 on macos-latest)` | 4/4 success |
 | ☐ | CI — `Rule docs in sync` | success |
 | ☐ | CI — `CLI smoke test` | success |
 | ☐ | Security — `pip-audit`, `bandit`, `CodeQL (Python)` | all 3 success |
