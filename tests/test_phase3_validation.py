@@ -480,6 +480,45 @@ End Sub
     )
 
 
+def test_array_accepts_unlimited_args(run_source):
+    """VBA's `Array()` is a ParamArray — callers may pass arbitrarily
+    many values. Regression for stdAcc's `CreateLookupDict(Array(...))`
+    populated with 122 name/value pairs."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim v As Variant\n"
+        "    v = Array(" + ", ".join(str(i) for i in range(150)) + ")\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    arg_errors = [e for e in result.errors if "Argument count mismatch for 'Array'" in (e.get("message") or "")]
+    assert not arg_errors, (
+        f"`Array()` is a ParamArray — must accept any arg count. Got: {arg_errors!r}"
+    )
+
+
+def test_choose_and_switch_accept_unlimited_args(run_source):
+    """Same as Array — `Choose(idx, c1, c2, ...)` and
+    `Switch(cond1, val1, cond2, val2, ...)` are ParamArray-style."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim v As Variant\n"
+        "    v = Choose(1, " + ", ".join(f'"v{i}"' for i in range(120)) + ")\n"
+        "    v = Switch(" + ", ".join(f'True, "v{i}"' for i in range(60)) + ")\n"
+        "End Sub\n"
+    )
+    result = run_source(code)
+    arg_errors = [e for e in result.errors if "Argument count mismatch for" in (e.get("message") or "")]
+    assert not arg_errors, (
+        f"`Choose`/`Switch` are ParamArray — must accept any arg count. "
+        f"Got: {arg_errors!r}"
+    )
+
+
 def test_enum_arg_compatible_with_long_byref_param(run_source):
     """VBA accepts `Dim x As MyEnum: Inner x` against
     `Sub Inner(ByRef p As Long)` because enums are Long under the
