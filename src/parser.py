@@ -1142,6 +1142,15 @@ class VBAParser:
                 self.advance()
                 break
 
+            # Leading-dot target — `ReDim .points(1 To 10)` inside a
+            # `With X` block. We preserve the leading `.` in chain_tokens
+            # so the analyzer can substitute the with-stack anchor.
+            leading_dot = None
+            if self.match('OPERATOR', '.'):
+                leading_dot = self.current_token
+                raw_tokens.append(leading_dot)
+                self.advance()
+
             # Target name token
             if self.current_token.type != 'IDENTIFIER':
                 raw_tokens.append(self.current_token)
@@ -1155,7 +1164,7 @@ class VBAParser:
             # Track the full chain so the analyser can resolve dotted
             # ReDim targets (`ReDim This.scopes(1 To N)`) via the same
             # member-walker that powers P2.6 member-chain typing.
-            chain_tokens = [name_token]
+            chain_tokens = [leading_dot, name_token] if leading_dot else [name_token]
             while self.match('OPERATOR', '.'):
                 dot_tok = self.current_token
                 raw_tokens.append(dot_tok)
@@ -1221,7 +1230,7 @@ class VBAParser:
         raw_tokens = []
         self.consume('IDENTIFIER', 'Erase')
 
-        targets = []
+        targets = []  # Either Token (bare name) or list[Token] (dotted chain).
         while self.current_token.type not in ('NEWLINE', 'EOF'):
             if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
                 raw_tokens.append(self.current_token)
@@ -1229,16 +1238,26 @@ class VBAParser:
                 break
 
             if self.current_token.type == 'IDENTIFIER':
-                targets.append(self.current_token)
-                raw_tokens.append(self.current_token)
+                first_tok = self.current_token
+                raw_tokens.append(first_tok)
                 self.advance()
-                # Skip qualified name parts (foo.bar)
+                # Capture qualified name parts (foo.bar.baz). We store the
+                # whole chain so the analyzer can walk it via
+                # `_resolve_lhs_type` — bare-name targets become a list of
+                # length 1, which keeps the existing single-name code path
+                # working unchanged.
+                chain = [first_tok]
                 while self.match('OPERATOR', '.'):
-                    raw_tokens.append(self.current_token)
+                    dot_tok = self.current_token
+                    raw_tokens.append(dot_tok)
+                    chain.append(dot_tok)
                     self.advance()
                     if self.current_token.type == 'IDENTIFIER':
-                        raw_tokens.append(self.current_token)
+                        member_tok = self.current_token
+                        raw_tokens.append(member_tok)
+                        chain.append(member_tok)
                         self.advance()
+                targets.append(chain)
             else:
                 raw_tokens.append(self.current_token)
                 self.advance()
