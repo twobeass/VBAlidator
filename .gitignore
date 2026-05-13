@@ -20,3 +20,7 @@ htmlcov/
 # Build / release artefacts
 /dist/
 /wheels/
+
+# Per-session working notes (Claude Code workspace docs, not source)
+CLAUDE.md
+HANDOVER*.md
