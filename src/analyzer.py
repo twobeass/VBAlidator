@@ -1472,7 +1472,7 @@ class Analyzer:
         type_name, _, _ = self.analyze_expression_info(tokens, scope, filename, context, with_stack, report_errors=report_errors)
         return type_name
 
-    def analyze_expression_info(self, tokens, scope, filename, context, with_stack, report_errors=True):
+    def analyze_expression_info(self, tokens, scope, filename, context, with_stack, report_errors=True, allow_implicit_call=True):
         KEYWORDS = {
             'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit', 
             'on', 'error', 'goto', 'resume', 'do', 'loop', 'while', 'wend', 
@@ -1505,7 +1505,11 @@ class Analyzer:
             token = tokens[i]
             
             # Check for Implicit Call (Sub style)
-            if last_resolved_kind in ('Function', 'Procedure', 'Global') and last_resolved_name and not expect_member:
+            # Only legal at statement level — inside an expression (e.g.
+            # `Round(Timer - t, 3)`) the comma is a Round-arg separator,
+            # not a Timer-arg separator. Disabling the check in recursive
+            # paren-contents avoids attributing `(Timer - t, 3)` to Timer.
+            if allow_implicit_call and last_resolved_kind in ('Function', 'Procedure', 'Global') and last_resolved_name and not expect_member:
                  is_arg_start = False
                  if token.type in ('STRING', 'INTEGER', 'FLOAT'): is_arg_start = True
                  elif token.type == 'IDENTIFIER' and token.value.lower() not in KEYWORDS: is_arg_start = True
@@ -1518,7 +1522,7 @@ class Analyzer:
 
                       args = self.split_args(arg_tokens)
                       for arg in args:
-                          self.analyze_expression_info(arg, scope, filename, context, with_stack, report_errors=report_errors)
+                          self.analyze_expression_info(arg, scope, filename, context, with_stack, report_errors=report_errors, allow_implicit_call=False)
                       break
             
             if token.type == 'OPERATOR':
@@ -1727,7 +1731,7 @@ class Analyzer:
 
                     if sub_tokens:
                         # Inner expression analysis
-                        inner_type, _, _ = self.analyze_expression_info(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors)
+                        inner_type, _, _ = self.analyze_expression_info(sub_tokens, scope, filename, context, with_stack, report_errors=report_errors, allow_implicit_call=False)
                     
                     # Determine result type
                     if last_resolved_type is None:

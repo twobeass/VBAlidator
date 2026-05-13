@@ -558,3 +558,51 @@ End Sub
     assert not mismatches, (
         f"Empty-paren `arr()` must keep the array type. Got: {mismatches!r}"
     )
+
+
+def test_subcall_inside_expression_does_not_steal_args(run_source):
+    """Sub-style implicit calls (`MsgBox "hi"`, `Debug.Print 1, 2`) are
+    legal at statement level but NOT inside an expression. The classic
+    failure: `Round(Timer - t, 3)` was attributing `Timer - t, 3` to
+    `Timer` (a 0-arg built-in) instead of letting the comma split
+    `Round`'s args. Regression for VBA-MemoryTools `DemoLibMemory.bas`."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    Dim t As Double
+    t = Timer
+    Debug.Print "elapsed: " & VBA.Round(Timer - t, 3)
+    Debug.Print "elapsed: " & Round(Timer - t, 3)
+End Sub
+"""
+    result = run_source(code)
+    hard = [e for e in result.errors if e.get("severity", "error") == "error"]
+    assert not hard, (
+        f"`Round(Timer - t, 3)` must split args at the comma, not interpret "
+        f"`Timer` as a 2-arg call. Got: {hard!r}"
+    )
+
+
+def test_statement_level_subcall_still_works(run_source):
+    """Sub-style implicit calls at the start of a statement must keep
+    working — the fix above must not regress `MsgBox "Hi"` /
+    `Debug.Print x, y` style code."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub Greet(s As String, n As Long)
+End Sub
+
+Sub S()
+    Dim n As Long
+    n = 3
+    Debug.Print "hi", n
+    Greet "world", n
+End Sub
+"""
+    result = run_source(code)
+    hard = [e for e in result.errors if e.get("severity", "error") == "error"]
+    assert not hard, (
+        f"Statement-level Sub-style calls must stay valid. Got: {hard!r}"
+    )

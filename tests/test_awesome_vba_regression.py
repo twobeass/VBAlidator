@@ -48,12 +48,11 @@ BASELINE: dict[str, tuple[int, str]] = {
         "it whenever a `.frm` in the scan set references the library.",
     ),
     "VBA-MemoryTools-master": (
-        17,
-        "15× parser quirk: `VBA.Round(Timer - t, 3)` reads Timer as a "
-        "2-arg call instead of 0-arg followed by `- t, 3`. Plus 2× real "
-        "const-initialiser-references-variable issues in upstream "
-        "LibMemory.bas (genuine library code patterns the strict-mode "
-        "rule flags).",
+        2,
+        "Down from 17 by suppressing Sub-style implicit-call interpretation "
+        "inside expression sub-tokens (the `Round(Timer - t, 3)` quirk). "
+        "The 2 remaining are genuine upstream const-initialiser-references-"
+        "variable issues in LibMemory.bas that the strict-mode rule flags.",
     ),
     "VbTrickTimer-master": (
         0,
@@ -63,12 +62,13 @@ BASELINE: dict[str, tuple[int, str]] = {
         "not an indexed element access).",
     ),
     "stdVBA-master": (
-        22,
+        21,
         "Down from 180 via --host excel + library namespaces + stdError "
-        "fixture + MSForms 2.0 host model + Enum<->Long ByRef compat in "
-        "both directions. Remaining ≈22 are deep analyzer cases (With-"
-        "block, IUnknown-inheritance, GUID-as-array, member-on-unknown-"
-        "type) earmarked for vbatest Iter-5.",
+        "fixture + MSForms 2.0 host model + Enum<->Long ByRef compat + "
+        "suppressing Sub-style implicit-call inside expressions. "
+        "Remaining ≈21 are deep analyzer cases (With-block, IUnknown-"
+        "inheritance, GUID-as-array, member-on-unknown-type) earmarked "
+        "for vbatest Iter-5.",
     ),
 }
 
