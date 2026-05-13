@@ -7,6 +7,8 @@ before it becomes an analyzer regression.
 """
 from __future__ import annotations
 
+import pytest
+
 from src.lexer import Lexer
 from src.parser import (
     CaseClauseNode,
@@ -241,3 +243,27 @@ def test_unexpected_character_still_reports_error():
     assert any(e.char == "€" for e in lex.errors), (
         f"Euro sign must still surface as lexer error. Errors: {[e.char for e in lex.errors]!r}"
     )
+
+
+@pytest.mark.timeout(5)
+def test_standalone_end_statement_inside_if_block_does_not_hang():
+    """Regression: `parse_block` previously prefix-matched the standalone
+    `End` *statement* (program terminator) against multi-word block markers
+    like `End If`, returning early and trapping callers in an infinite loop
+    once a label followed. Reproduced by stdVBA's `stdError.cls::Raise`."""
+    code = """
+Attribute VB_Name = "M"
+Public Function Raise() As Long
+    If True Then
+      End
+    End If
+    Exit Function
+ErrorOccurred:
+    Raise = 1
+End Function
+"""
+    module = _parse(code)
+    # Must reach the procedure and capture both the standalone End and
+    # the label-tagged recovery branch without hanging.
+    assert len(module.procedures) == 1
+    assert module.procedures[0].body, "Function body must not be empty"

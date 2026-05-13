@@ -684,11 +684,21 @@ class VBAParser:
                 val = self.current_token.value.lower()
                 # Check directly if the current token matches a marker (e.g. "Loop", "Next", "Else")
                 for marker in end_markers:
-                    if marker.lower().split()[0] == val:
-                         # Potential match. 
-                         # If marker is "Next", and we have "Next i", it's a match.
-                         # If marker is "Else", and we have "Else", it's a match.
-                         return nodes
+                    parts = marker.lower().split()
+                    if parts[0] != val:
+                        continue
+                    # Multi-word markers ("End If", "End With", ...) are handled
+                    # by the dedicated `End` branch above which requires the full
+                    # two-token form. Don't prefix-match them here — that would
+                    # consume the standalone `End` *statement* (the program
+                    # terminator) and trap callers in an infinite loop when the
+                    # If/With body contains one.
+                    if len(parts) > 1:
+                        continue
+                    # Potential match.
+                    # If marker is "Next", and we have "Next i", it's a match.
+                    # If marker is "Else", and we have "Else", it's a match.
+                    return nodes
 
                 # VALIDATION: Check for unexpected block terminators
                 if val in ('next', 'loop', 'else', 'elseif', 'wend'):

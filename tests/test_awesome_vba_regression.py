@@ -62,13 +62,13 @@ BASELINE: dict[str, tuple[int, str]] = {
         "compatible-with-anything sentinel the VBA compiler does.",
     ),
     "stdVBA-master": (
-        108,
+        99,
         "Down from 180 by adding --host excel + VBA library namespaces "
         "(Conversion/Math/Strings/DateTime/...) + RGB/QBColor + file-IO "
-        "built-ins. Remaining: 15× MSForms (needs MSForms 2.0 model), "
-        "9× missing stdError.cls fixture (real library/fixture gap), "
-        "~73 deep analyzer cases (Enum→Long ByRef, With-block, "
-        "IUnknown-inheritance, GUID-as-array) earmarked for vbatest Iter-5.",
+        "built-ins, then closing the stdError.cls fixture gap (-9). "
+        "Remaining: 15× MSForms (needs MSForms 2.0 model), ~73 deep "
+        "analyzer cases (Enum→Long ByRef, With-block, IUnknown-inheritance, "
+        "GUID-as-array) earmarked for vbatest Iter-5.",
     ),
 }
 
