@@ -43,16 +43,29 @@ def _module_type_for(path: Path) -> str:
     return "Module"
 
 
-def run_pipeline_on_files(paths: list[Path], extra_defines: dict | None = None) -> AnalysisResult:
+def run_pipeline_on_files(
+    paths: list[Path],
+    extra_defines: dict | None = None,
+    host: str | None = None,
+) -> AnalysisResult:
     """Run the full Lexer→Preprocessor→Parser→Analyzer pipeline.
 
     Mirrors src/main.py but works on an explicit file list instead of a folder
     walk and returns a structured result for assertion in tests.
+
+    `host` layers the bundled `src/models/<host>.json` on top of std_model —
+    same path the CLI takes for `--host excel|word|access|outlook|visio`.
+    Defaults to None (std_model only) for backward-compat with the existing
+    tests that don't pass it.
     """
     config = Config()
     if extra_defines:
         for k, v in extra_defines.items():
             config.definitions[k.upper()] = v
+    if host:
+        model_path = ROOT / "src" / "models" / f"{host}.json"
+        if model_path.is_file():
+            config.load_model(str(model_path))
 
     analyzer = Analyzer(config)
     lexer_errors: list[Any] = []

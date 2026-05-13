@@ -150,7 +150,41 @@
     "Choose": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
     "Switch": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 99 },
     "Partition": { "type": "Function", "returns": "String", "min_args": 4, "max_args": 4 },
+    "RGB": { "type": "Function", "returns": "Long", "min_args": 3, "max_args": 3 },
+    "QBColor": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 1 },
     "CallByName": { "type": "Function", "returns": "Variant", "min_args": 3, "max_args": 99 },
+
+    "Conversion":  { "type": "Variant" },
+    "Math":        { "type": "Variant" },
+    "Strings":     { "type": "Variant" },
+    "DateTime":    { "type": "Variant" },
+    "FileSystem":  { "type": "Variant" },
+    "Information": { "type": "Variant" },
+    "Interaction": { "type": "Variant" },
+    "Financial":   { "type": "Variant" },
+
+    "vbVerticalTab": { "type": "String" },
+
+    "Kill":     { "type": "Sub" },
+    "MkDir":    { "type": "Sub" },
+    "ChDir":    { "type": "Sub" },
+    "ChDrive":  { "type": "Sub" },
+    "RmDir":    { "type": "Sub" },
+    "FileCopy": { "type": "Sub" },
+    "CurDir":   { "type": "Function", "returns": "String", "min_args": 0, "max_args": 1 },
+
+    "SavePicture": { "type": "Sub" },
+    "LoadPicture": { "type": "Function", "returns": "Object", "min_args": 0, "max_args": 4 },
+
+    "AppActivate": { "type": "Sub" },
+    "SendKeys":    { "type": "Sub" },
+
+    "Open":  { "type": "Variant" },
+    "Close": { "type": "Variant" },
+    "Print": { "type": "Variant" },
+    "Write": { "type": "Variant" },
+    "Get":   { "type": "Variant" },
+    "Put":   { "type": "Variant" },
 
     "DoEvents": { "type": "Function", "returns": "Integer", "min_args": 0, "max_args": 0 },
     "Beep": { "type": "Sub" },
