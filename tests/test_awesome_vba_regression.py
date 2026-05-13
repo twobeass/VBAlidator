@@ -48,11 +48,12 @@ BASELINE: dict[str, tuple[int, str]] = {
         "it whenever a `.frm` in the scan set references the library.",
     ),
     "VBA-MemoryTools-master": (
-        2,
-        "Down from 17 by suppressing Sub-style implicit-call interpretation "
-        "inside expression sub-tokens (the `Round(Timer - t, 3)` quirk). "
-        "The 2 remaining are genuine upstream const-initialiser-references-"
-        "variable issues in LibMemory.bas that the strict-mode rule flags.",
+        0,
+        "Clean — suppressing Sub-style implicit-call inside expressions "
+        "closed the 15× `VBA.Round(Timer - t, 3)` parser quirk, and "
+        "registering source-declared Enum members with kind='EnumItem' "
+        "(not 'Variable') closed the 2× `Const X = MyEnum.Member` "
+        "false-positives in LibMemory.bas.",
     ),
     "VbTrickTimer-master": (
         0,
@@ -62,13 +63,14 @@ BASELINE: dict[str, tuple[int, str]] = {
         "not an indexed element access).",
     ),
     "stdVBA-master": (
-        20,
+        19,
         "Down from 180 via --host excel + library namespaces + stdError "
         "fixture + MSForms 2.0 host model + Enum<->Long ByRef compat + "
-        "suppressing Sub-style implicit-call inside expressions + Array/"
-        "Choose/Switch as ParamArray. Remaining ≈20 are deep analyzer "
-        "cases (With-block, IUnknown-inheritance, GUID-as-array, member-"
-        "on-unknown-type) earmarked for vbatest Iter-5.",
+        "suppressing Sub-style implicit-call + Array/Choose/Switch as "
+        "ParamArray + Enum members registered as kind='EnumItem' "
+        "(constants). Remaining ≈19 are deep analyzer cases (With-block, "
+        "Erase member-chain, member-on-unknown-type) earmarked for "
+        "vbatest Iter-5.",
     ),
 }
 

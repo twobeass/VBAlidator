@@ -110,7 +110,12 @@ class Analyzer:
             if mod.module_type == 'Module':
                 for var in mod.variables:
                     if var.scope.lower() in ('public', 'global', 'friend'):
-                        kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                        if getattr(var, 'is_enum_member', False):
+                            kind = 'EnumItem'
+                        elif getattr(var, 'is_const', False):
+                            kind = 'Const'
+                        else:
+                            kind = 'Variable'
                         self.global_scope.define(var.name, var.type_name, kind)
                 
                 for proc in mod.procedures:
@@ -135,7 +140,12 @@ class Analyzer:
             mod_scope = SymbolTable(mod.name, parent=self.global_scope, scope_type=mod.module_type)
 
             for var in mod.variables:
-                kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                if getattr(var, 'is_enum_member', False):
+                    kind = 'EnumItem'
+                elif getattr(var, 'is_const', False):
+                    kind = 'Const'
+                else:
+                    kind = 'Variable'
                 mod_scope.define(var.name, var.type_name, kind)
             for proc in mod.procedures:
                 mod_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)

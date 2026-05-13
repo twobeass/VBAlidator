@@ -645,3 +645,28 @@ End Sub
     assert not hard, (
         f"Statement-level Sub-style calls must stay valid. Got: {hard!r}"
     )
+
+
+def test_enum_member_is_valid_const_initialiser(run_source):
+    """Source-declared `Enum` members are compile-time Long constants in
+    VBA — they may appear on the RHS of `Const X = MyEnum.Member * 4`.
+    Regression for VBA-MemoryTools' `LibMemory.bas::EmptyArray`."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+
+Public Enum FADF
+    FADF_AUTO = &H1
+    FADF_HAVEVARTYPE = &H80
+End Enum
+
+Sub S()
+    Const fFeaturesHi As Long = FADF_HAVEVARTYPE * &H10000
+End Sub
+"""
+    result = run_source(code)
+    const_errors = [e for e in result.errors if "non-constant" in (e.get("message") or "")]
+    assert not const_errors, (
+        f"Enum members must count as constant on the RHS of `Const X = …`. "
+        f"Got: {const_errors!r}"
+    )
