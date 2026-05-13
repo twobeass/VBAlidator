@@ -1006,6 +1006,16 @@ class Analyzer:
                 continue
             name = name_token.value
 
+            # Leading-dot target — `ReDim .points(1 To N)` inside a
+            # `With X` block. We can't usefully walk the chain without
+            # the with-stack anchor's actual UDT/Class, so stay silent
+            # instead of emitting a phantom "Undefined identifier" on
+            # the bare member name.
+            if chain_tokens and chain_tokens[0].type == 'OPERATOR' and chain_tokens[0].value == '.':
+                if dim_tokens:
+                    self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+                continue
+
             # Dotted target: walk the chain via the P2.6 LHS resolver.
             if chain_tokens and len(chain_tokens) > 1:
                 resolved_type, resolved_kind = self._resolve_lhs_type(chain_tokens, scope)
@@ -1069,13 +1079,44 @@ class Analyzer:
 
     def _analyze_erase(self, node, scope, filename, context, with_stack):
         """Validate Erase targets must be array variables (or Variant)."""
-        for tok in node.targets:
-            name = tok.value
+        for target in node.targets:
+            # Backwards-compat: legacy parse_erase emitted a bare Token;
+            # current parser emits a list (single-Token list for bare names,
+            # longer for dotted chains like `Erase This.Leaf.points`).
+            if isinstance(target, list):
+                chain = target
+            else:
+                chain = [target]
+            first_tok = chain[0]
+            name = first_tok.value
+
+            # Dotted target: walk the chain through `_resolve_lhs_type`.
+            # An unresolvable hop returns (None, None) — stay silent in
+            # that case (member chain may pass through a permissive bag
+            # type like Variant/Object that we can't introspect).
+            if len(chain) > 1:
+                resolved_type, _kind = self._resolve_lhs_type(chain, scope)
+                if resolved_type is None:
+                    continue
+                target_type = (resolved_type or "").lower()
+                is_array = target_type.endswith("()") or "array" in target_type
+                is_variant = target_type in ("variant", "")
+                display = "".join(t.value for t in chain)
+                if not (is_array or is_variant):
+                    self.errors.append({
+                        "file": filename,
+                        "line": first_tok.line,
+                        "rule_id": "VBA106",
+                        "severity": "error",
+                        "message": f"Erase target '{display}' must be an array, got type '{resolved_type}' in '{context}'.",
+                    })
+                continue
+
             sym = scope.resolve(name)
             if sym is None:
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA104",
                     "severity": "error",
                     "message": f"Undefined identifier '{name}' in Erase target inside '{context}'.",
@@ -1088,7 +1129,7 @@ class Analyzer:
             if kind not in ("variable", "expression") and kind != "":
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA105",
                     "severity": "error",
                     "message": f"Erase target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
@@ -1096,7 +1137,7 @@ class Analyzer:
             elif not (is_array or is_variant):
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA106",
                     "severity": "error",
                     "message": f"Erase target '{name}' must be an array, got type '{sym.get('type')}' in '{context}'.",
