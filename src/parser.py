@@ -50,10 +50,15 @@ class ProcedureNode(Node):
         return f"{decl}{ptr}{self.proc_type} {self.name}() As {self.return_type}"
 
 class TypeNode(Node):
-    def __init__(self, name, scope='Public'):
+    def __init__(self, name, scope='Public', is_enum=False):
         self.name = name
         self.scope = scope
         self.members = [] # List of VariableNode
+        # `parse_enum` reuses TypeNode for simplicity; this flag lets the
+        # analyzer distinguish "Enum of Long values" from a regular UDT —
+        # callers passing an Enum-typed variable to a `ByRef p As Long`
+        # are valid VBA (enums are Long under the hood).
+        self.is_enum = is_enum
 
     def __repr__(self):
         return f"Type {self.name} ({len(self.members)} members)"
@@ -1378,7 +1383,7 @@ class VBAParser:
 
         # Enums are basically Longs with named constants
         # We need to register the Enum Type AND the Enum Members as global/module constants
-        udt = TypeNode(enum_name, scope) # Reuse TypeNode for simplicity
+        udt = TypeNode(enum_name, scope, is_enum=True) # Reuse TypeNode for simplicity
 
         while self.current_token.type != 'EOF':
             if self.match('IDENTIFIER', 'End') and self.peek().value.lower() == 'enum':

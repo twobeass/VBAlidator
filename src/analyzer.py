@@ -1980,6 +1980,20 @@ class Analyzer:
                                  if a_lower == 'object':
                                      compatible = True
 
+                             # RELAXATION:
+                             # Enums are Long under the hood. Real VBA
+                             # accepts both directions:
+                             #   `Dim x As MyEnum: Inner x`  → `ByRef p As Long`
+                             #   `Dim x As Long:   Inner x`  → `ByRef p As MyEnum`
+                             # Treat any Enum<->Long pairing as compatible.
+                             if not compatible:
+                                 enum_long_compat = (
+                                     (p_lower == 'long' and self._is_enum_type(arg_type)) or
+                                     (a_lower == 'long' and self._is_enum_type(param_type))
+                                 )
+                                 if enum_long_compat:
+                                     compatible = True
+
                              if not compatible:
                                  self.errors.append({
                                      "file": filename,
@@ -2225,3 +2239,19 @@ class Analyzer:
                 if m_key.lower() == name.lower():
                     return m_val
         return None
+
+    def _is_enum_type(self, type_name):
+        """True if `type_name` names an Enum — either one declared in the
+        scanned VBA source (TypeNode with is_enum=True) or one provided by
+        a loaded host model (`enums` section of object_model)."""
+        if not type_name or not isinstance(type_name, str):
+            return False
+        low = type_name.lower()
+        # Host-model enums.
+        if low in self.config.object_model.get("enums", {}):
+            return True
+        # Source-declared enums (registered as UDTs with is_enum=True).
+        udt = self.udts.get(low)
+        if udt is not None and getattr(udt, "is_enum", False):
+            return True
+        return False

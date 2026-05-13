@@ -480,6 +480,60 @@ End Sub
     )
 
 
+def test_enum_arg_compatible_with_long_byref_param(run_source):
+    """VBA accepts `Dim x As MyEnum: Inner x` against
+    `Sub Inner(ByRef p As Long)` because enums are Long under the
+    hood. Regression for stdVBA-style code."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Public Enum ParentType
+    ptStandard = 1
+End Enum
+
+Sub Inner(ByRef p As Long)
+End Sub
+
+Sub Caller()
+    Dim x As ParentType
+    Inner x
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"Enum-typed argument must accept Long ByRef param. Got: {mismatches!r}"
+    )
+
+
+def test_long_arg_compatible_with_enum_byref_param(run_source):
+    """Reverse direction: `Dim x As Long: Inner x` against
+    `Sub Inner(ByRef p As MyEnum)` — also valid VBA, and the dominant
+    pattern in stdVBA's `stdLambda.cls` opcode emitter."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Public Enum IInstruction
+    iOp1 = 1
+    iOp2 = 2
+End Enum
+
+Sub Emit(ByRef kInstruction As IInstruction)
+End Sub
+
+Sub Caller()
+    Dim x As Long
+    x = 1
+    Emit x
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"Long-typed argument must accept Enum ByRef param. Got: {mismatches!r}"
+    )
+
+
 def test_array_passed_with_empty_parens_keeps_array_type(run_source):
     """`arr()` with empty parens is VBA's explicit pass-whole-array syntax,
     not an indexed element access — the type must stay the array, not
