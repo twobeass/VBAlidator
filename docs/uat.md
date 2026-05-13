@@ -37,7 +37,7 @@ actual regression.
 | ☐ | `pytest -ra` | **152 passed** in ~2 s. No skips on Linux/macOS; the three `roundtrip_off_platform` tests skip only on Windows. |
 | ☐ | `pytest --cov=src` then `coverage report` | Total coverage **≥ 83 %**, with `src/scoring.py` and `src/rules.py` at 100 %. |
 | ☐ | `ruff check src tests tools` | `All checks passed!` |
-| ☐ | `python tools/generate_rule_docs.py` | `docs/rules/: 35 rules, 0 files updated.` (idempotent) |
+| ☐ | `python tools/generate_rule_docs.py` | `docs/rules/: 41 rules, 0 files updated.` (idempotent) |
 
 If the rule generator reports `> 0 files updated`, **fail UAT** —
 something diverged between `src/rules.py` and the committed catalogue.
