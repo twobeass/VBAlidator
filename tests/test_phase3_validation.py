@@ -430,3 +430,77 @@ def test_class_module_header_does_not_trigger_vba361(run_source):
     result = run_source(code, module_type="Class")
     bad = [e for e in result.errors if e.get("rule_id") == "VBA361"]
     assert not bad, f"`.cls` header block must not produce VBA361. Got: {bad!r}"
+
+
+def test_declare_any_byref_accepts_any_concrete_type(run_source):
+    """`As Any` in a Declare statement is VBA's universally-compatible
+    sentinel — the analyzer must not flag callers passing concrete types."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" ( _
+    ByRef Destination As Any, ByRef Source As Any, ByVal Length As LongPtr)
+
+Sub S()
+    Dim b As Byte
+    Dim l As Long
+    Dim s As String
+    CopyMemory b, l, 1
+    CopyMemory s, b, 1
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"`As Any` ByRef params must accept any concrete type. Got: {mismatches!r}"
+    )
+
+
+def test_declare_any_array_byref_accepts_concrete_array(run_source):
+    """`As Any()` is the array form of the `Any` sentinel — same contract,
+    must accept any concrete array type (regression for VbTrickTimer's
+    `DupArray` declaration)."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Private Declare PtrSafe Sub DupArray Lib "kernel32" Alias "RtlMoveMemory" ( _
+    ByRef Destination() As Any, ByRef pSA As Any, _
+    Optional ByVal Length As LongPtr = 8)
+
+Sub S()
+    Dim bData() As Byte
+    Dim tSAMap As Long
+    DupArray bData, VarPtr(tSAMap)
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"`As Any()` ByRef params must accept any concrete array type. Got: {mismatches!r}"
+    )
+
+
+def test_array_passed_with_empty_parens_keeps_array_type(run_source):
+    """`arr()` with empty parens is VBA's explicit pass-whole-array syntax,
+    not an indexed element access — the type must stay the array, not
+    collapse to the element. Regression for VbTrickTimer's
+    `FindSignature(bData(), bTemplate(), bMask())`."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Private Function FindSignature(ByRef bData() As Byte, ByRef bSign() As Byte) As Long
+    FindSignature = 0
+End Function
+
+Sub S()
+    Dim bData() As Byte
+    Dim bSign() As Byte
+    Dim lIndex As Long
+    lIndex = FindSignature(bData(), bSign())
+End Sub
+"""
+    result = run_source(code)
+    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
+    assert not mismatches, (
+        f"Empty-paren `arr()` must keep the array type. Got: {mismatches!r}"
+    )
