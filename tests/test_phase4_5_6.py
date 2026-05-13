@@ -424,6 +424,78 @@ def test_strip_export_directives_idempotent_on_clean_input():
     assert _strip_export_directives(clean) == clean
 
 
+def test_strip_export_directives_drops_leading_bom():
+    """A leading UTF-8 BOM (U+FEFF) makes VBE report 'ungültige Zeichen'
+    on the very first character before it can parse anything; strip
+    it together with the rest of the header."""
+    from src.roundtrip import _strip_export_directives
+    raw = (
+        "﻿"
+        'Attribute VB_Name = "M"\n'
+        "Sub S()\nEnd Sub\n"
+    )
+    out = _strip_export_directives(raw)
+    assert not out.startswith("﻿"), repr(out[:5])
+    assert "Attribute " not in out
+
+
+def test_is_userform_export_matches_frm_header():
+    """`.frm` exports open with `VERSION 5.00` followed by
+    `Begin {GUID} Name … End` — that GUID-prefixed Begin block is the
+    distinguishing fingerprint."""
+    from src.roundtrip import _is_userform_export
+    raw = (
+        "VERSION 5.00\n"
+        "Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\n"
+        '   Caption         =   "UserForm1"\n'
+        "End\n"
+        'Attribute VB_Name = "BadForm"\n'
+        "Sub S()\nEnd Sub\n"
+    )
+    assert _is_userform_export(raw) is True
+
+
+def test_is_userform_export_rejects_class_export():
+    """`.cls` files also open with VERSION + BEGIN but the Begin line is
+    a bare `BEGIN\\n` — no GUID, no class fingerprint. They must round-
+    trip normally, not get skipped as a UserForm."""
+    from src.roundtrip import _is_userform_export
+    raw = (
+        "VERSION 1.0 CLASS\n"
+        "BEGIN\n"
+        "  MultiUse = -1  'True\n"
+        "END\n"
+        'Attribute VB_Name = "MyClass"\n'
+        "Sub S()\nEnd Sub\n"
+    )
+    assert _is_userform_export(raw) is False
+
+
+def test_is_userform_export_rejects_plain_bas_module():
+    """Standard modules have no VERSION line at all."""
+    from src.roundtrip import _is_userform_export
+    raw = (
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\nEnd Sub\n"
+    )
+    assert _is_userform_export(raw) is False
+
+
+def test_is_userform_export_tolerates_leading_bom_and_whitespace():
+    """A `.frm` exported with a UTF-8 BOM or leading blank lines must
+    still be recognised — otherwise it would slip through and trigger
+    the dialog-hang we're trying to prevent."""
+    from src.roundtrip import _is_userform_export
+    raw = (
+        "﻿   \n"
+        "VERSION 5.00\n"
+        "Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\n"
+        "End\n"
+    )
+    assert _is_userform_export(raw) is True
+
+
 def test_inconclusive_issue_distinct_from_unavailable():
     """`VBA_RT000` (unavailable) and `VBA_RT002` (inconclusive) must
     have different rule_ids and severities so callers can tell whether

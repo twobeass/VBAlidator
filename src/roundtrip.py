@@ -39,6 +39,7 @@ the temp file is deleted, and the Office app is quit even on errors.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -188,6 +189,18 @@ def verify_compile(
         text = str(source)
         comp_name = "InjectedModule"
         kind = cfg["module_kind"]
+
+    # UserForms cannot round-trip from text alone (.frx binary companion
+    # is missing); skip with a clear info so the caller learns this is
+    # a structural limitation, not a transient failure.
+    if _is_userform_export(text):
+        return [_make_unavailable_issue(
+            "round-trip not supported for UserForms (.frm) — VBA exports "
+            "a binary `.frx` companion that holds the layout and embedded "
+            "controls; without it VBE rejects the import as "
+            "'ungültige Zeichen'. The static analyser remains the "
+            "authoritative answer for this file."
+        )]
 
     # win32com is the more reliable backend. We only fall back to comtypes
     # when win32com isn't present.
@@ -350,7 +363,10 @@ def _strip_export_directives(text: str) -> str:
     The right thing is to skip every leading line that is part of the
     header block and pass only the actual code to the module.
     """
-    lines = text.splitlines(keepends=True)
+    # Strip a leading UTF-8/UTF-16 BOM — exporters sometimes prepend one
+    # and VBE rejects the resulting first character as `ungültige Zeichen`
+    # before it ever parses the directives below.
+    lines = text.lstrip("﻿").splitlines(keepends=True)
     body: list[str] = []
     in_header = True
     in_begin_block = False  # the `BEGIN ... END` form attribute block
@@ -377,6 +393,33 @@ def _strip_export_directives(text: str) -> str:
             in_header = False  # first non-directive content
         body.append(line)
     return "".join(body)
+
+
+_FORM_EXPORT_RE = re.compile(
+    r"\AVERSION\s+5\.\d+\s*\r?\n\s*Begin\s+\{[0-9A-Fa-f\-]+\}",
+)
+
+
+def _is_userform_export(text: str) -> bool:
+    """True when `text` looks like a `.frm` UserForm export.
+
+    UserForm exports open with ``VERSION 5.00 / Begin {GUID} Name … End``
+    — the GUID-prefixed Begin block is the discriminator that separates
+    them from ``.cls`` (which uses a bare ``BEGIN\\n  MultiUse = -1\\nEND``)
+    and from ``.bas`` (no `VERSION` line at all).
+
+    Round-trip can't faithfully recreate a UserForm from the text alone:
+    the visual layout and embedded ActiveX controls live in a binary
+    ``.frx`` companion that VBA's exporter writes alongside. Without that
+    companion VBE refuses the import — usually as "ungültige Zeichen" /
+    "invalid character" on the dangling ``OleObjectBlob = "…frx":0000``
+    pointer inside the Begin block.
+
+    Callers should emit a ``VBA_RT000`` info (round-trip unavailable)
+    rather than push a guaranteed-broken text through the COM pipeline.
+    """
+    head = text.lstrip("﻿").lstrip()
+    return bool(_FORM_EXPORT_RE.match(head))
 
 
 # ---- Compile-trigger strategies --------------------------------------
@@ -658,6 +701,25 @@ def _verify_with_win32com(
 
         comp = vbproj.VBComponents.Add(kind)
         comp.Name = comp_name
+        # Clear the fresh component before injection. When the VBE user
+        # setting "Require Variable Declaration" is on (very common,
+        # especially in Office Trust-locked corporate profiles), every
+        # new module is auto-populated with `Option Explicit`. Stacking
+        # the user's own `Option Explicit` on top of that triggers a
+        # modal "Option Explicit doppelt" / "Option statement already
+        # specified" dialog that hangs the COM call until our 30s
+        # timeout taskkills Office — turning real compile errors into
+        # spurious VBA_RT002 noise.
+        try:
+            existing = comp.CodeModule.CountOfLines
+            if existing > 0:
+                comp.CodeModule.DeleteLines(1, existing)
+        except Exception:
+            # CountOfLines/DeleteLines can fail on some Office SKUs when
+            # the project is read-only or mid-startup. Pressing on with
+            # AddFromString is harmless — at worst we hit the duplicate
+            # dialog and the timeout still protects us.
+            pass
         # Strip the `.bas` export header before injecting — Attribute /
         # VERSION / BEGIN-END are only legal at file-import time.
         comp.CodeModule.AddFromString(_strip_export_directives(text))
