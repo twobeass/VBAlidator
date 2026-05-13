@@ -143,8 +143,11 @@ deployed automatically from `main` by `.github/workflows/docs.yml`.
 In-repo:
 
 - [Quickstart](docs/quickstart.md) — install → scan → ship
+- [GitHub Actions integration](docs/github-actions.md) — copy-paste
+  workflow recipes (path-filter, JSON artifact, PR annotations,
+  multi-host matrix, step summary, status badge)
 - [AI pipeline integration](docs/ai-integration.md) — patterns for
-  Claude, OpenAI Agents, LangChain, CI gates
+  Claude, OpenAI Agents, LangChain
 - [Usage](docs/Usage.md) — full CLI / Python API reference
 - [Configuration](docs/Configuration.md) — host models, custom models,
   conditional-compilation defaults, heuristics
