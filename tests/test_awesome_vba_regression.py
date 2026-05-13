@@ -23,10 +23,10 @@ AWESOME_DIR = Path(__file__).resolve().parent / "awesome_vba"
 # Initial baseline measured in PR #1 (Phase 0), each value is the current
 # ceiling — never a target. Lower me as the analyzer improves.
 BASELINE: dict[str, tuple[int, str]] = {
-    "JSONBag": (1, "baseline phase-3+P2.6 fixup; ComctlLib chains now permissive"),
-    "VBA-MemoryTools-master": (17, "baseline phase-3+P2.6 fixup"),
-    "VbTrickTimer-master": (5, "baseline phase-3; preprocessor case-fix + numeric type suffix"),
-    "stdVBA-master": (180, "baseline iter-4-wave-4; +On…GoTo +CallByName +ReDim member chain"),
+    "JSONBag": (1, "tightened post full-host-models migration"),
+    "VBA-MemoryTools-master": (17, "unchanged from iter-4; the regenerated Excel/Word/etc. models don't help here because run_files() uses std_model only — see TODO §D.2 and vbatest Iter-5 (host-flag in awesome_vba tests)"),
+    "VbTrickTimer-master": (5, "preprocessor case-fix + numeric type suffix"),
+    "stdVBA-master": (180, "unchanged from iter-4 baseline; see VBA-MemoryTools comment for rationale"),
 }
 
 
