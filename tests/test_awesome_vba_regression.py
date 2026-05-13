@@ -43,9 +43,9 @@ HOSTS: dict[str, str | None] = {
 # a known coverage gap.
 BASELINE: dict[str, tuple[int, str]] = {
     "JSONBag": (
-        1,
-        "1× TreeView.Move — Microsoft Common Controls (MSComCtl) member; "
-        "needs the MSComCtl host model to ship (Iter-6 candidate).",
+        0,
+        "Clean — fixed by shipping the MSComCtl host model and auto-layering "
+        "it whenever a `.frm` in the scan set references the library.",
     ),
     "VBA-MemoryTools-master": (
         17,

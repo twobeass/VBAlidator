@@ -248,6 +248,96 @@ def test_unknown_host_does_not_crash(tmp_path):
     assert result.compile_safe
 
 
+# ---- MSComCtl auto-layer ----------------------------------------------------
+
+
+def _MSCOMCTL_FORM(call: str) -> str:
+    """A minimal `.frm` referencing the Microsoft Common Controls library
+    plus the inline VBA snippet `call` inside `Form_Resize`."""
+    return (
+        "VERSION 5.00\n"
+        "Object = \"{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.2#0\"; \"MSCOMCTL.OCX\"\n"
+        "Begin VB.Form Form1\n"
+        "   Caption = \"Test\"\n"
+        "   Begin ComctlLib.TreeView TreeView1\n"
+        "      Height = 2535\n"
+        "   End\n"
+        "End\n"
+        'Attribute VB_Name = "Form1"\n'
+        "Option Explicit\n"
+        "Private Sub Form_Resize()\n"
+        f"    {call}\n"
+        "End Sub\n"
+    )
+
+
+def test_mscomctl_autolayers_when_frm_references_comctllib(tmp_path):
+    """A `.frm` declaring a `ComctlLib.TreeView` control must auto-layer
+    `models/mscomctl.json` so member access on the control (e.g.
+    `TreeView1.Move`) resolves without the user passing `--host mscomctl`."""
+    frm = tmp_path / "Form1.frm"
+    frm.write_text(_MSCOMCTL_FORM("TreeView1.Move 0, 0, 100, 100"), encoding="latin-1")
+    result = precheck(frm)
+    member_errors = [e for e in result.errors if "Move" in e.get("message", "")]
+    assert not member_errors, (
+        f"TreeView.Move must resolve via auto-layered mscomctl model. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_mscomctl_resolves_listview_and_progressbar_members(tmp_path):
+    """The other shipped control classes (ListView, ProgressBar, …) also
+    pick up the VB6 container-control base members."""
+    frm = tmp_path / "Form2.frm"
+    frm.write_text(
+        "VERSION 5.00\n"
+        "Begin VB.Form Form2\n"
+        "   Begin ComctlLib.ListView LV1\n"
+        "      Height = 1000\n"
+        "   End\n"
+        "   Begin ComctlLib.ProgressBar PB1\n"
+        "      Height = 200\n"
+        "   End\n"
+        "End\n"
+        'Attribute VB_Name = "Form2"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    LV1.Visible = True\n"
+        "    PB1.Width = 200\n"
+        "End Sub\n",
+        encoding="latin-1",
+    )
+    result = precheck(frm)
+    member_errors = [
+        e for e in result.errors
+        if "Visible" in e.get("message", "") or "Width" in e.get("message", "")
+    ]
+    assert not member_errors, (
+        f"ListView.Visible / ProgressBar.Width must resolve. Errors: {result.errors!r}"
+    )
+
+
+def test_mscomctl_autolayer_explicit_host_choice(tmp_path):
+    """`--host mscomctl` is also a valid CLI choice — the model loads
+    even when no `.frm` triggers the auto-layer (covers the explicit
+    opt-in path for users analyzing `.bas` modules that use the controls
+    via late binding)."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S(t As TreeView)\n"
+        "    t.Move 0, 0, 100, 100\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="mscomctl")
+    member_errors = [e for e in result.errors if "Move" in e.get("message", "")]
+    assert not member_errors, (
+        f"With --host=mscomctl, TreeView.Move must resolve. "
+        f"Errors: {result.errors!r}"
+    )
+
+
 # ---- Defines -----------------------------------------------------------
 
 
@@ -291,7 +381,7 @@ End Sub
 # ---- Models JSON well-formed --------------------------------------------
 
 
-@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook"])
+@pytest.mark.parametrize("host", ["excel", "word", "access", "outlook", "visio", "mscomctl"])
 def test_host_model_json_loads(host):
     """Every shipped host model must be valid JSON with the expected sections."""
     import json

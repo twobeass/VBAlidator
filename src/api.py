@@ -202,6 +202,22 @@ def precheck(
             config.load_model(str(auto))
 
     files, n_files = _iter_input_files(source)
+
+    # Auto-layer `models/mscomctl.json` when any `.frm` in the scan set
+    # references the Microsoft Common Controls library (TreeView /
+    # ListView / Toolbar etc.). Keeps the UX hands-off — users don't need
+    # to spell out `--host mscomctl` alongside their Excel/Word host.
+    import re as _re_mscomctl
+    _mscomctl_pat = _re_mscomctl.compile(r"\b(?:MS)?Comctl(?:Lib)?\b", _re_mscomctl.IGNORECASE)
+    if any(
+        os.path.splitext(filename)[1].lower() == ".frm"
+        and _mscomctl_pat.search(content)
+        for filename, content in files
+    ):
+        mscomctl_path = Path(__file__).resolve().parent / "models" / "mscomctl.json"
+        if mscomctl_path.is_file():
+            config.load_model(str(mscomctl_path))
+
     analyzer = Analyzer(config)
 
     for filename, content in files:
