@@ -1799,13 +1799,29 @@ class Analyzer:
                     if end_index > start_index:
                         sub_tokens = tokens[start_index : end_index]
 
-                    # Hook for CreateObject("ProgID")
-                    if last_resolved_name and last_resolved_name.lower() == 'createobject':
-                            if len(sub_tokens) > 0 and sub_tokens[0].type == 'STRING':
-                                prog_id = sub_tokens[0].value.strip('"')
-                                # Try to resolve ProgID as class
-                                if self.config.get_class(prog_id):
-                                    inferred_ret_type = prog_id
+                    # Hook for CreateObject("ProgID") / GetObject(, "ProgID")
+                    # — infer the return type from the ProgID string. Try
+                    # both the full ProgID (matches namespaced classes
+                    # like `Shell.Application`) and the bare last segment
+                    # (matches `Dictionary` from `Scripting.Dictionary`).
+                    if last_resolved_name and last_resolved_name.lower() in ('createobject', 'getobject'):
+                            prog_id_tok = None
+                            if last_resolved_name.lower() == 'createobject':
+                                if len(sub_tokens) > 0 and sub_tokens[0].type == 'STRING':
+                                    prog_id_tok = sub_tokens[0]
+                            else:
+                                # GetObject(pathname, [class]) — the ProgID,
+                                # if any, is the second positional argument.
+                                args_split = self.split_args(sub_tokens)
+                                if len(args_split) >= 2 and args_split[1] and args_split[1][0].type == 'STRING':
+                                    prog_id_tok = args_split[1][0]
+                            if prog_id_tok is not None:
+                                prog_id = prog_id_tok.value.strip('"')
+                                bare = prog_id.split('.')[-1] if '.' in prog_id else None
+                                for candidate in (prog_id, bare):
+                                    if candidate and self.config.get_class(candidate):
+                                        inferred_ret_type = candidate
+                                        break
 
                     # Hook for Signature Validation
                     if report_errors and last_resolved_symbol:
