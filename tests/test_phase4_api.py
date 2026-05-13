@@ -521,6 +521,82 @@ def test_shell_application_autolayers_without_breaking_excel(tmp_path):
     )
 
 
+# ---- CreateObject ProgID type inference -----------------------------------
+
+
+def test_createobject_dotted_progid_resolves_via_last_segment(tmp_path):
+    """`Set d = CreateObject("Scripting.Dictionary")` must give `d` the
+    Dictionary type even though our `scripting.json` stub registers the
+    bare class name `Dictionary` (not the fully-qualified ProgID).
+    Falls back from the full ProgID to its last segment so library
+    stubs can use either naming style."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim d As Object\n"
+        '    Set d = CreateObject("Scripting.Dictionary")\n'
+        # If the inference worked, .Count resolves; otherwise we'd see a
+        # member-not-found on the inferred Variant.
+        "    Dim n As Long: n = d.Count\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    member_errors = [
+        e for e in result.errors
+        if "Count" in e.get("message", "") and "not found" in e.get("message", "")
+    ]
+    assert not member_errors, (
+        f"CreateObject('Scripting.Dictionary') must type the result via "
+        f"the bare class name. Got: {result.errors!r}"
+    )
+
+
+def test_createobject_full_progid_resolves_when_class_is_namespaced(tmp_path):
+    """For stubs that use ProgID-style class names (e.g.
+    `shell_application.json::Shell.Application`), the full ProgID
+    matches and the bare fallback isn't needed."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim sh As Object\n"
+        '    Set sh = CreateObject("Shell.Application")\n'
+        "    Call sh.NameSpace(0)\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    member_errors = [
+        e for e in result.errors
+        if "NameSpace" in e.get("message", "") and "not found" in e.get("message", "")
+    ]
+    assert not member_errors, (
+        f"CreateObject('Shell.Application') must type the result via "
+        f"the namespaced class. Got: {result.errors!r}"
+    )
+
+
+def test_getobject_class_arg_also_resolves(tmp_path):
+    """`GetObject(pathname, "ProgID")` exposes the same ProgID-inference
+    surface as `CreateObject`. The class is the second positional arg."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim wb As Object\n"
+        '    Set wb = GetObject("C:\\\\some\\\\file.xlsx", "Excel.Application")\n'
+        "End Sub\n",
+    )
+    # We only verify the call analyzes without crashing; the Excel host
+    # is not auto-layered here, so type inference may not fully resolve
+    # but the GetObject path must not throw.
+    result = precheck(bas)
+    assert isinstance(result.score, int)
+
+
 # ---- Defines -----------------------------------------------------------
 
 
