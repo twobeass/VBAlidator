@@ -1457,6 +1457,19 @@ class Analyzer:
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
 
     def analyze_statement(self, tokens, scope, filename, context, with_stack, report_errors=True):
+        # `On Error GoTo <label>` / `On Error Resume Next` / `On Error
+        # GoTo 0|-1` — fully validated by `_validate_jump_target`. Don't
+        # re-walk the token stream as a value-bearing expression or
+        # `Error` would be treated as a bare identifier (which it is in
+        # other VBA contexts — see the comment in `analyze_expression_info`'s
+        # KEYWORDS set — but here it's part of the On-Error syntax).
+        if (
+            tokens and tokens[0].type == 'IDENTIFIER' and tokens[0].value.lower() == 'on'
+            and len(tokens) >= 2 and tokens[1].type == 'IDENTIFIER'
+            and tokens[1].value.lower() == 'error'
+        ):
+            return None
+
         # `On <expr> GoTo lbl1, lbl2, ...` (computed GoTo). Analyse the
         # selector expression normally and skip the label list — those
         # identifiers are validated by `_validate_jump_target`, not as
@@ -1474,13 +1487,19 @@ class Analyzer:
 
     def analyze_expression_info(self, tokens, scope, filename, context, with_stack, report_errors=True, allow_implicit_call=True):
         KEYWORDS = {
-            'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit', 
-            'on', 'error', 'goto', 'resume', 'do', 'loop', 'while', 'wend', 
+            'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit',
+            # `error` is intentionally NOT here — VBA reserves it only in
+            # the two-token forms `On Error ...` (handled by the dedicated
+            # `on` + lookahead branch above analyze_statement) and `Error
+            # <number>` raise-statement. Anywhere else it's a perfectly
+            # valid identifier (and stdVBA's `stdAcc::AwaitForElement`
+            # uses it as a local variable name).
+            'on', 'goto', 'resume', 'do', 'loop', 'while', 'wend',
             'for', 'next', 'select', 'case', 'with', 'to', 'step', 'in',
             'byval', 'byref', 'optional', 'paramarray', 'true', 'false',
             'nothing', 'empty', 'null',
-            'not', 'each', 'sub', 'function', 'property', 'const', 'dim', 'as', 
-            'type', 'boolean', 'integer', 'string', 'variant', 'object', 
+            'not', 'each', 'sub', 'function', 'property', 'const', 'dim', 'as',
+            'type', 'boolean', 'integer', 'string', 'variant', 'object',
             'byte', 'long', 'single', 'double', 'currency', 'date', 'decimal',
             'and', 'or', 'xor', 'is', 'like', 'typeof', 'mod', 'new', 'print',
             'open', 'close', 'input', 'output', 'append', 'binary', 'random',
