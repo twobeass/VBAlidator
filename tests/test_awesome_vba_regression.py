@@ -63,12 +63,12 @@ BASELINE: dict[str, tuple[int, str]] = {
         "not an indexed element access).",
     ),
     "stdVBA-master": (
-        84,
-        "Down from 180 via --host excel + VBA library namespaces + the "
-        "stdError.cls fixture + suppressing Sub-style implicit-call inside "
-        "expressions + the MSForms 2.0 host model. Remaining ≈84 are deep "
-        "analyzer cases (Enum→Long ByRef, With-block, IUnknown-inheritance, "
-        "GUID-as-array) earmarked for vbatest Iter-5.",
+        22,
+        "Down from 180 via --host excel + library namespaces + stdError "
+        "fixture + MSForms 2.0 host model + Enum<->Long ByRef compat in "
+        "both directions. Remaining ≈22 are deep analyzer cases (With-"
+        "block, IUnknown-inheritance, GUID-as-array, member-on-unknown-"
+        "type) earmarked for vbatest Iter-5.",
     ),
 }
 
