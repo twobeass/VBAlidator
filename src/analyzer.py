@@ -864,6 +864,8 @@ class Analyzer:
                         self.errors.append({
                             "file": filename,
                             "line": node.tokens[0].line,
+                            "rule_id": "VBA009",
+                            "severity": "warning",
                             "message": f"Unreachable code detected in '{context}'."
                         })
 
@@ -955,6 +957,8 @@ class Analyzer:
                      self.errors.append({
                          "file": filename,
                          "line": node.expr_tokens[0].line if node.expr_tokens else 0,
+                         "rule_id": "VBA009",
+                         "severity": "warning",
                          "message": f"Unreachable code detected (With block) in '{context}'."
                      })
 
@@ -972,9 +976,17 @@ class Analyzer:
 
             elif isinstance(node, DoNode):
                 # Do [While|Until cond] / Do … Loop While|Until / While … Wend
-                if node.condition_tokens:
+                # For bottom-tested loops the condition is evaluated *after*
+                # the body — analyse the body first so any `Dim` inside the
+                # body has registered the variable before the condition reads
+                # it (regression for stdReg's `Loop While result = …` where
+                # `result` is declared inline in the loop body).
+                pos = getattr(node, 'condition_position', 'top')
+                if pos == 'top' and node.condition_tokens:
                     self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
                 self.analyze_block(node.body, scope, filename, context, with_stack)
+                if pos == 'bottom' and node.condition_tokens:
+                    self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
 
             elif isinstance(node, SelectNode):
                 # Selector expression
