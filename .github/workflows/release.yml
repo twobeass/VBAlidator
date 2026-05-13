@@ -28,7 +28,13 @@ jobs:
           # python-semantic-release needs the full history to compute
           # the bump from conventional commits.
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # SEMANTIC_RELEASE_TOKEN is a fine-grained PAT with Contents +
+          # Pull-requests write. The default GITHUB_TOKEN cannot bypass
+          # branch protection on main (GitHub's anti-loop protection
+          # also blocks Actions-pushed tags from triggering follow-up
+          # workflows), so the version-bump push + tag would otherwise
+          # be rejected by the protected-branch rules.
+          token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
       - uses: actions/setup-python@v6
         with:
@@ -43,7 +49,9 @@ jobs:
       - name: Run semantic-release (bump version + tag + GitHub release)
         id: semrel
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same PAT as in checkout — semantic-release uses GH_TOKEN to
+          # push the bump commit + tag and to create the GitHub release.
+          GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
         run: |
           # Detect whether semantic-release would publish anything.
           if semantic-release version --print > /tmp/next.txt 2>&1; then
