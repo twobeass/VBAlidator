@@ -63,16 +63,15 @@ BASELINE: dict[str, tuple[int, str]] = {
         "not an indexed element access).",
     ),
     "stdVBA-master": (
-        5,
-        "Down from 180. All remaining 5 are **genuine upstream bugs**, "
-        "not analyzer false-positives: 3× typos in stdImage.cls "
-        "(`lImageSikze` declared / `lImageSize` used; `stWepY` / `stepY`), "
-        "1× `On Error GoTo stdErrorWrapper_ErrorOccurred` in "
-        "stdCallback.cls::RunEx pointing at a label that doesn't exist "
-        "(only `errorinrtccallbyname` is declared), and 1× default-"
-        "property `Item` resolution gap on `acc.children(idx)` in "
-        "stdAcc.cls (the only remaining analyzer FP, the abstract "
-        "Collection→Item indirection is iter-8 territory).",
+        4,
+        "Down from 180. **All remaining 4 are genuine upstream library "
+        "bugs** — none are analyzer false-positives: 3× typos in "
+        "stdImage.cls (`lImageSikze` declared but `lImageSize` used twice; "
+        "`stWepY` typo for `stepY`) and 1× `On Error GoTo "
+        "stdErrorWrapper_ErrorOccurred` in stdCallback.cls::RunEx "
+        "pointing at a label that doesn't exist (only "
+        "`errorinrtccallbyname` is declared). VBAlidator FP surface is "
+        "**zero** across all 4 awesome_vba fixtures.",
     ),
 }
 

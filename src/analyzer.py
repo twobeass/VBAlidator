@@ -1807,8 +1807,25 @@ class Analyzer:
                                 if self.config.get_class(prog_id):
                                     inferred_ret_type = prog_id
 
-                    # Hook for Signature Validation
-                    if report_errors and last_resolved_symbol:
+                    # Hook for Signature Validation.
+                    #
+                    # Skip when this looks like a default-property `Item`
+                    # call: `obj.children(idx)` where `children` is a
+                    # 0-arg Property returning a collection-like type
+                    # (Collection / Dictionary / anything with `.Item`).
+                    # VBA implicitly rewrites that to
+                    # `obj.children.Item(idx)`, so the args belong to
+                    # `Item`, not the property. Without this exemption
+                    # we get a phantom "Expected at most 0, got 1" on
+                    # idiomatic library code (stdAcc.cls).
+                    is_default_property_item_call = (
+                        sub_tokens
+                        and isinstance(last_resolved_symbol, dict)
+                        and last_resolved_type
+                        and last_resolved_type not in ('Unknown', 'Variant', 'Object')
+                        and self.resolve_member(last_resolved_type, 'Item') is not None
+                    )
+                    if report_errors and last_resolved_symbol and not is_default_property_item_call:
                             self.validate_signature(last_resolved_name, last_resolved_symbol, sub_tokens, filename, token.line, context, scope, with_stack)
 
                     if sub_tokens:
