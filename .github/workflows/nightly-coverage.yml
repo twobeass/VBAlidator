@@ -1,0 +1,51 @@
+name: Nightly coverage drift
+
+on:
+  schedule:
+    - cron: "0 4 * * *"     # 04:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Awesome-VBA score drift snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Snapshot per-project counts
+        run: |
+          python -c "
+          import json, sys
+          from pathlib import Path
+          from src.api import precheck
+          out = {}
+          for p in sorted(Path('tests/awesome_vba').iterdir()):
+              if not p.is_dir():
+                  continue
+              r = precheck(p)
+              out[p.name] = {
+                  'errors': len(r.errors),
+                  'warnings': len(r.warnings),
+                  'score': r.score,
+                  'compile_safe': r.compile_safe,
+              }
+          Path('drift.json').write_text(json.dumps(out, indent=2, sort_keys=True))
+          print(json.dumps(out, indent=2, sort_keys=True))
+          "
+
+      - name: Upload drift snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-drift
+          path: drift.json

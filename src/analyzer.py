@@ -1,4 +1,35 @@
-from .parser import VariableNode, ProcedureNode, WithNode, StatementNode, IfNode
+from .parser import (  # noqa: F401
+    DoNode,
+    EraseNode,
+    ForNode,
+    IfNode,
+    ProcedureNode,
+    RedimNode,
+    SelectNode,
+    StatementNode,
+    WithNode,
+)
+
+def _normalize_identifier(name):
+    """Strip VBA legacy type-suffix and bracket-quoting from an identifier.
+
+    - `Mid$` → `mid` (String)
+    - `x%`   → `x`   (Integer)
+    - `c@`   → `c`   (Currency)
+    - `[A1]` → `a1`  (foreign-name escape)
+    """
+    if not name:
+        return name
+    n = name
+    # Bracket-quoted: [foo] → foo
+    if len(n) >= 2 and n[0] == '[' and n[-1] == ']':
+        n = n[1:-1]
+    # Trailing legacy type-suffix (only the unambiguous ones — &/!/# are
+    # operators / preprocessor / date markers and never lex into IDENTIFIER).
+    if n and n[-1] in '$%@':
+        n = n[:-1]
+    return n.lower()
+
 
 class SymbolTable:
     def __init__(self, name, parent=None, scope_type='Block'):
@@ -8,12 +39,12 @@ class SymbolTable:
         self.symbols = {} # name -> {type: ..., kind: Var/Proc/Class, extra: ...}
 
     def define(self, name, type_name, kind, extra=None):
-        self.symbols[name.lower()] = {"type": type_name, "kind": kind, "extra": extra}
+        self.symbols[_normalize_identifier(name)] = {"type": type_name, "kind": kind, "extra": extra}
 
     def resolve(self, name):
-        name = name.lower()
-        if name in self.symbols:
-            return self.symbols[name]
+        key = _normalize_identifier(name)
+        if key in self.symbols:
+            return self.symbols[key]
         if self.parent:
             return self.parent.resolve(name)
         return None
@@ -26,6 +57,9 @@ class Analyzer:
         self.errors = []
         self.udts = {} # name_lower -> TypeNode
         self.reference_names = set()
+        self._current_labels = None
+        self._current_proc_name = None
+        self._current_def_type_map = {}
         
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
@@ -76,7 +110,8 @@ class Analyzer:
             if mod.module_type == 'Module':
                 for var in mod.variables:
                     if var.scope.lower() in ('public', 'global', 'friend'):
-                        self.global_scope.define(var.name, var.type_name, 'Variable')
+                        kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                        self.global_scope.define(var.name, var.type_name, kind)
                 
                 for proc in mod.procedures:
                     if proc.scope.lower() in ('public', 'friend'):
@@ -98,29 +133,706 @@ class Analyzer:
     def pass2_resolution(self):
         for mod in self.modules:
             mod_scope = SymbolTable(mod.name, parent=self.global_scope, scope_type=mod.module_type)
-            
+
             for var in mod.variables:
-                mod_scope.define(var.name, var.type_name, 'Variable')
+                kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                mod_scope.define(var.name, var.type_name, kind)
             for proc in mod.procedures:
                 mod_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
             # Register Local/Private Types in Module Scope
             for type_name, udt in mod.types.items():
                 mod_scope.define(type_name, type_name, 'Type')
                 self.udts[type_name.lower()] = udt
-                
+
             if mod.module_type in ('Form', 'Class'):
                  mod_scope.define('Me', mod.name, 'Variable')
-            
+
+            # Phase 2.3 — Property Get/Let/Set arity & type compatibility
+            self._validate_property_arity(mod)
+
+            # Phase 3.3 — Declare PtrSafe (64-bit) requirement
+            self._validate_ptrsafe_declares(mod)
+
+            # Phase 3.4 — Enum-member uniqueness within an enum
+            self._validate_enum_uniqueness(mod)
+
+            # Phase 3.6 — Option Explicit (style-warning, configurable)
+            self._validate_option_explicit(mod)
+
+            # Phase 3.1 — Implements <Interface> contract check
+            self._validate_implements(mod, mod_scope)
+
             for proc in mod.procedures:
                 self.analyze_procedure(proc, mod_scope, mod)
 
+    def _validate_option_explicit(self, mod):
+        """Modules without `Option Explicit` allow implicit (auto-Variant)
+        variable creation, which is the #1 source of typo-induced bugs in
+        VBA. Style-level severity: doesn't fail compilation but is a strong
+        code-quality signal for AI-generated code reviews.
+        """
+        # Forms have an implicit Option Explicit-like behaviour for their
+        # Begin/End block, but their `_Initialize` etc. modules still
+        # benefit from the explicit declaration.
+        opts = getattr(mod, 'options', {}) or {}
+        if not opts.get('explicit', False):
+            self.errors.append({
+                "file": mod.filename,
+                "line": 1,
+                "rule_id": "VBA320",
+                "severity": "warning",
+                "message": (
+                    f"Module '{mod.name}' is missing `Option Explicit`. "
+                    f"Without it, typo'd variable names silently create new "
+                    f"Variant variables — a common source of AI-generated bugs."
+                ),
+            })
+
+    def _validate_implements(self, mod, mod_scope):
+        """For each `Implements X` statement, verify the class provides a
+        matching method `X_<Member>` for every public member of the
+        interface. The interface itself is resolved either as a same-project
+        class module (best effort) or as a library type.
+        """
+        impls = getattr(mod, 'implements', []) or []
+        if not impls:
+            return
+        for raw in impls:
+            iface_name = raw.split('.')[-1]
+            iface = self._find_interface_module(iface_name)
+            if iface is None:
+                # Unknown interface — let the regular identifier resolver
+                # (or a future library-type pass) handle it.
+                continue
+            for proc in iface.procedures:
+                if proc.proc_type and proc.proc_type.lower().startswith(('sub', 'function', 'property')):
+                    if proc.scope.lower() not in ('public', 'friend'):
+                        continue
+                    expected_name = f"{iface_name}_{proc.name}"
+                    found = any(p.name.lower() == expected_name.lower() for p in mod.procedures)
+                    if not found:
+                        self.errors.append({
+                            "file": mod.filename,
+                            "line": 0,
+                            "rule_id": "VBA330",
+                            "severity": "error",
+                            "message": (
+                                f"Class '{mod.name}' implements '{iface_name}' but is "
+                                f"missing the required method '{expected_name}' "
+                                f"(matching {proc.proc_type} {proc.name})."
+                            ),
+                        })
+
+    def _find_interface_module(self, iface_name):
+        target = iface_name.lower()
+        for mod in self.modules:
+            if mod.module_type in ('Class', 'Form') and mod.name.lower() == target:
+                return mod
+        return None
+
+    # ---- Phase 3.2: RaiseEvent target + argument count ------------------
+
+    def _validate_raise_event(self, tokens, scope, filename, context):
+        """`RaiseEvent <Name>(<args>?)` — only legal when <Name> is an
+        Event declared in the same Class/Form module. Validate name and
+        argument count.
+        """
+        if not tokens or len(tokens) < 2:
+            return
+        if tokens[0].type != 'IDENTIFIER' or tokens[0].value.lower() != 'raiseevent':
+            return
+        name_tok = tokens[1]
+        if name_tok.type != 'IDENTIFIER':
+            return
+
+        # Look up the event by name in the module that owns the current
+        # procedure (events are private to their declaring class).
+        event = None
+        for mod in self.modules:
+            if mod.filename != filename:
+                continue
+            for proc in mod.procedures:
+                if (proc.proc_type or '').lower() == 'event' and proc.name.lower() == name_tok.value.lower():
+                    event = proc
+                    break
+            break
+        if event is None:
+            self.errors.append({
+                "file": filename,
+                "line": name_tok.line,
+                "rule_id": "VBA340",
+                "severity": "error",
+                "message": (
+                    f"RaiseEvent '{name_tok.value}' in '{context}': no matching "
+                    f"`Event {name_tok.value}` declared in this module."
+                ),
+            })
+            return
+
+        # Count arguments — between the parens following the event name.
+        # Token shape: [RaiseEvent, Name, '(', arg, ',', arg, ..., ')'].
+        if len(tokens) < 3 or not (tokens[2].type == 'OPERATOR' and tokens[2].value == '('):
+            actual = 0
+        else:
+            actual = self._count_call_args(tokens, 2)
+
+        expected_min = sum(1 for a in event.args if not a.is_optional and not a.is_paramarray)
+        expected_max = len(event.args)
+        # ParamArray accepts unlimited.
+        if any(a.is_paramarray for a in event.args):
+            expected_max = 9999
+
+        if actual < expected_min or actual > expected_max:
+            self.errors.append({
+                "file": filename,
+                "line": name_tok.line,
+                "rule_id": "VBA341",
+                "severity": "error",
+                "message": (
+                    f"RaiseEvent '{name_tok.value}' arg count mismatch: "
+                    f"event declared with {expected_min}{('..' + str(expected_max)) if expected_max != expected_min else ''} "
+                    f"parameter(s), got {actual}."
+                ),
+            })
+
+    def _count_call_args(self, tokens, lparen_idx):
+        """Given a token list and the index of the opening `(`, return the
+        number of comma-separated top-level arguments inside the parens.
+        Empty parens → 0.
+        """
+        depth = 0
+        count = 0
+        seen_any = False
+        for j in range(lparen_idx, len(tokens)):
+            t = tokens[j]
+            if t.type == 'OPERATOR' and t.value == '(':
+                depth += 1
+            elif t.type == 'OPERATOR' and t.value == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            elif depth == 1 and t.type == 'OPERATOR' and t.value == ',':
+                count += 1
+                seen_any = True
+            elif depth == 1:
+                seen_any = True
+        if seen_any:
+            return count + 1
+        return 0
+
+    def _validate_ptrsafe_declares(self, mod):
+        """In 64-bit Office (the modern default since Office 2010 for x64
+        and the current Microsoft 365 default) every `Declare` statement
+        must carry the `PtrSafe` attribute. The check is gated by the
+        `WIN64` / `VBA7` conditional-compilation defines so a 32-bit-only
+        run can opt out by passing `--define WIN64=False`.
+        """
+        defs = self.config.definitions
+        # If the user has explicitly set 32-bit, skip the check.
+        if defs.get('WIN64') is False or defs.get('VBA7') is False:
+            return
+        for proc in mod.procedures:
+            if not proc.is_declare:
+                continue
+            if proc.is_ptrsafe:
+                continue
+            self.errors.append({
+                "file": mod.filename,
+                "line": getattr(proc, 'declare_line', 0) or 0,
+                "rule_id": "VBA300",
+                "severity": "error",
+                "message": (
+                    f"Declare {proc.proc_type} '{proc.name}' is missing the "
+                    f"`PtrSafe` attribute. 64-bit VBA (Office 2010 x64+, "
+                    f"Microsoft 365) refuses to compile API declarations "
+                    f"without it. Add `PtrSafe` after `Declare`."
+                ),
+            })
+
+    def _validate_enum_uniqueness(self, mod):
+        """Within a single Enum block all member names must be unique.
+        VBA accepts duplicate *values* (`A = 1: B = 1`) but not duplicate
+        *names*. The error here mirrors the IDE's compile-time message.
+        """
+        for type_name, type_node in mod.types.items():
+            members = getattr(type_node, 'members', [])
+            # Heuristic: enums are registered alongside UDTs in mod.types,
+            # but enum members carry a literal Long type while UDT members
+            # have arbitrary types — and Enum members are exposed
+            # globally via pass1_discovery. We cover both: if a member
+            # name repeats inside `members`, flag it.
+            seen = {}
+            for m in members:
+                key = m.name.lower()
+                first_seen = seen.get(key)
+                if first_seen is not None:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA310",
+                        "severity": "error",
+                        "message": (
+                            f"Enum / Type '{type_name}' has duplicate member name "
+                            f"'{m.name}'."
+                        ),
+                    })
+                else:
+                    seen[key] = m
+
+    def _validate_property_arity(self, mod):
+        """Group properties by name and verify the Get/Let/Set contract:
+
+        - Property Let / Property Set must have exactly Get-arg-count + 1
+          parameters (the trailing parameter receives the assigned value).
+        - The trailing parameter type of Let/Set should be assignable to
+          the Property Get return type.
+        - Property Set is only valid when the assigned-value parameter is
+          object-typed; Property Let is the value-typed sibling.
+        """
+        from collections import defaultdict
+        groups = defaultdict(dict)
+        for proc in mod.procedures:
+            ptype = (proc.proc_type or "").lower()
+            if not ptype.startswith("property"):
+                continue
+            kind = ptype.split()[-1]  # 'get' | 'let' | 'set'
+            if kind in ('get', 'let', 'set'):
+                groups[proc.name.lower()][kind] = proc
+
+        for prop_name, members in groups.items():
+            get_proc = members.get('get')
+            let_proc = members.get('let')
+            set_proc = members.get('set')
+
+            # Note: VBA *does* permit both Property Let AND Property Set on
+            # the same property name as long as they accept different
+            # value-parameter types (real-world libraries like JSONBag use
+            # this for polymorphic properties), so we explicitly do NOT
+            # flag the Let+Set combination.
+
+            for accessor in (let_proc, set_proc):
+                if accessor is None:
+                    continue
+                if not accessor.args:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA221",
+                        "severity": "error",
+                        "message": (
+                            f"{accessor.proc_type} '{accessor.name}' must have at least one parameter "
+                            f"(the assigned value)."
+                        ),
+                    })
+                    continue
+
+                if get_proc is not None:
+                    expected = len(get_proc.args) + 1
+                    actual = len(accessor.args)
+                    if actual != expected:
+                        self.errors.append({
+                            "file": mod.filename,
+                            "line": 0,
+                            "rule_id": "VBA222",
+                            "severity": "error",
+                            "message": (
+                                f"{accessor.proc_type} '{accessor.name}' must have {expected} parameter(s) "
+                                f"(Property Get '{get_proc.name}' has {len(get_proc.args)}); got {actual}."
+                            ),
+                        })
+                        continue
+
+                # Set/Let semantic mismatch — independent of Get presence.
+                last_arg = accessor.args[-1]
+                kind = accessor.proc_type.split()[-1].lower()
+                rhs_is_object = self._is_clearly_object(last_arg.type_name)
+                rhs_is_scalar = self._is_clearly_scalar(last_arg.type_name)
+                if kind == 'set' and rhs_is_scalar:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA223",
+                        "severity": "error",
+                        "message": (
+                            f"Property Set '{accessor.name}' last parameter '{last_arg.name}' "
+                            f"is scalar type '{last_arg.type_name}'; use Property Let instead."
+                        ),
+                    })
+                elif kind == 'let' and rhs_is_object:
+                    self.errors.append({
+                        "file": mod.filename,
+                        "line": 0,
+                        "rule_id": "VBA224",
+                        "severity": "error",
+                        "message": (
+                            f"Property Let '{accessor.name}' last parameter '{last_arg.name}' "
+                            f"is object type '{last_arg.type_name}'; use Property Set instead."
+                        ),
+                    })
+
     def analyze_procedure(self, proc, mod_scope, mod):
         proc_scope = SymbolTable(proc.name, parent=mod_scope, scope_type='Procedure')
-        
+
         for arg in proc.args:
             proc_scope.define(arg.name, arg.type_name, 'Variable')
-            
-        self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
+
+        # Pass 1.5 — collect all labels reachable inside this procedure so
+        # GoTo / On Error GoTo / Resume / GoSub can be validated against
+        # them in pass 2.
+        labels = set()
+        self._collect_labels(proc.body, labels)
+        self._current_labels = labels
+        self._current_proc_name = proc.name
+        self._current_def_type_map = getattr(mod, "def_type_map", {}) or {}
+
+        try:
+            self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
+        finally:
+            self._current_labels = None
+            self._current_proc_name = None
+            self._current_def_type_map = {}
+
+    def _validate_jump_target(self, tokens, filename, context):
+        """Validate `GoTo`, `On Error GoTo`, `Resume`, `GoSub` against the
+        per-procedure label registry built in `analyze_procedure`.
+
+        Special forms accepted without a label:
+        - `On Error GoTo 0`     → resets the error handler
+        - `On Error GoTo -1`    → clears active error (Office VBA)
+        - `On Error Resume Next`
+        - `Resume` / `Resume Next` (no label)
+        - `On <expr> GoTo lbl1, lbl2, ...` and `On <expr> GoSub …`
+          (computed-GoTo jump table)
+        """
+        if not tokens or self._current_labels is None:
+            return
+
+        i = 0
+        n = len(tokens)
+        first = tokens[0].value.lower() if tokens[0].type == 'IDENTIFIER' else None
+
+        # `On Error GoTo <target>` / `On Error Resume Next`
+        if first == 'on' and n >= 2 and tokens[1].type == 'IDENTIFIER' and tokens[1].value.lower() == 'error':
+            i = 2
+            if i >= n:
+                return
+            kw = tokens[i].value.lower() if tokens[i].type == 'IDENTIFIER' else ''
+            if kw == 'resume':
+                # `On Error Resume Next` — no target to validate
+                return
+            if kw == 'goto':
+                i += 1
+                if i >= n:
+                    return
+                target_tok = tokens[i]
+                # `On Error GoTo 0` / `On Error GoTo -1` — reset/clear handler
+                if target_tok.type in ('INTEGER',):
+                    return
+                if target_tok.type == 'OPERATOR' and target_tok.value == '-':
+                    # negative integer e.g. -1
+                    return
+                if target_tok.type == 'IDENTIFIER':
+                    self._check_label_exists(target_tok, filename, context, "On Error GoTo")
+                    return
+            return
+
+        # `On <expr> GoTo lbl1, lbl2, ...` / `On <expr> GoSub lbl1, lbl2`
+        # (computed-GoTo jump table; the labels after the keyword are a
+        # comma-separated list, not value references.)
+        if first == 'on':
+            j = self._find_on_jump_keyword(tokens)
+            if j is not None:
+                kind = "On GoTo" if tokens[j].value.lower() == 'goto' else "On GoSub"
+                for tok in self._iter_label_list(tokens[j + 1:]):
+                    self._check_label_exists(tok, filename, context, kind)
+                return
+
+        if first == 'goto':
+            if n >= 2 and tokens[1].type == 'IDENTIFIER':
+                self._check_label_exists(tokens[1], filename, context, "GoTo")
+            elif n >= 2 and tokens[1].type == 'INTEGER':
+                # Numeric labels like `GoTo 100` — VBA allows them; require numeric label registered
+                # (We don't track numeric labels yet; tolerate to avoid false positives.)
+                return
+            return
+
+        if first == 'resume':
+            if n == 1:
+                return  # bare `Resume`
+            tok = tokens[1]
+            if tok.type == 'IDENTIFIER':
+                if tok.value.lower() == 'next':
+                    return
+                self._check_label_exists(tok, filename, context, "Resume")
+            return
+
+        if first == 'gosub':
+            if n >= 2 and tokens[1].type == 'IDENTIFIER':
+                self._check_label_exists(tokens[1], filename, context, "GoSub")
+            return
+
+    def _check_label_exists(self, token, filename, context, kind):
+        name = token.value.lower()
+        if name not in self._current_labels:
+            self.errors.append({
+                "file": filename,
+                "line": token.line,
+                "rule_id": "VBA201",
+                "severity": "error",
+                "message": (
+                    f"{kind} target '{token.value}' is not a label in '{context}'. "
+                    f"Declared labels: {sorted(self._current_labels) or 'none'}."
+                ),
+            })
+
+    @staticmethod
+    def _find_on_jump_keyword(tokens):
+        """Locate the index of `GoTo`/`GoSub` in an `On <expr> GoTo …` /
+        `On <expr> GoSub …` statement (the computed-GoTo form). Returns
+        None if this isn't an On-jump-table statement.
+
+        Skips identifiers/operators inside the `<expr>` portion. The
+        keyword we're looking for is the bare `GoTo` or `GoSub`
+        (NOT `On Error GoTo`, handled separately).
+        """
+        if not tokens or tokens[0].type != 'IDENTIFIER' or tokens[0].value.lower() != 'on':
+            return None
+        depth = 0
+        for idx in range(1, len(tokens)):
+            t = tokens[idx]
+            if t.type == 'OPERATOR':
+                if t.value == '(':
+                    depth += 1
+                elif t.value == ')':
+                    depth -= 1
+                continue
+            if depth == 0 and t.type == 'IDENTIFIER':
+                lv = t.value.lower()
+                if lv in ('goto', 'gosub'):
+                    return idx
+                if lv == 'error':
+                    return None  # handled by On Error branch
+        return None
+
+    @staticmethod
+    def _iter_label_list(tokens):
+        """Yield the identifier tokens from a comma-separated label list
+        like `lbl1, lbl2, lblN`. Stops at end of token stream or at a
+        colon (statement separator)."""
+        for t in tokens:
+            if t.type == 'OPERATOR':
+                if t.value == ':':
+                    return
+                # commas and other operators are skipped
+                continue
+            if t.type == 'IDENTIFIER':
+                yield t
+
+    # ---- Phase 2.2: Set vs. Let assignment enforcement -------------------
+
+    _SCALAR_TYPES = {
+        "boolean", "byte", "integer", "long", "longlong", "longptr",
+        "single", "double", "currency", "decimal", "date", "string",
+    }
+    _CALLABLE_KINDS = {"sub", "function", "procedure", "property", "library"}
+
+    def _is_clearly_scalar(self, type_name):
+        if not type_name:
+            return False
+        t = type_name.lower()
+        if t in self._SCALAR_TYPES:
+            return True
+        # User-defined Type (UDT) is value-typed, not Object.
+        if t in self.udts:
+            return True
+        return False
+
+    def _is_clearly_object(self, type_name):
+        if not type_name:
+            return False
+        t = type_name.lower()
+        if t == "object":
+            return True
+        # Known class in the standard / loaded model.
+        if self.config.object_model.get("classes", {}).get(t):
+            return True
+        return False
+
+    def _split_assignment(self, tokens):
+        """If `tokens` is an assignment, return (lhs_tokens, eq_index, rhs_tokens, has_set).
+        Otherwise return None.
+
+        Recognised forms:
+            <lhs> = <rhs>
+            Set <lhs> = <rhs>
+            Let <lhs> = <rhs>
+        """
+        if not tokens:
+            return None
+        # Strip trailing colon used as statement separator
+        toks = [t for t in tokens if not (t.type == 'OPERATOR' and t.value == ':')]
+        if not toks:
+            return None
+
+        has_set = False
+        has_let = False
+        start = 0
+        first = toks[0]
+        if first.type == 'IDENTIFIER' and first.value.lower() == 'set':
+            has_set = True
+            start = 1
+        elif first.type == 'IDENTIFIER' and first.value.lower() == 'let':
+            has_let = True
+            start = 1
+
+        # Find an `=` not preceded by `<`/`>`/`<=`/`>=` and not part of `:=` / `<>`.
+        eq_index = None
+        paren_depth = 0
+        for idx in range(start, len(toks)):
+            t = toks[idx]
+            if t.type == 'OPERATOR' and t.value == '(':
+                paren_depth += 1
+            elif t.type == 'OPERATOR' and t.value == ')':
+                paren_depth -= 1
+            elif paren_depth == 0 and t.type == 'OPERATOR' and t.value == '=':
+                # avoid named-arg form `name:=value` — but `:=` is its own token.
+                eq_index = idx
+                break
+        if eq_index is None:
+            return None
+
+        lhs = toks[start:eq_index]
+        rhs = toks[eq_index + 1:]
+        if not lhs:
+            return None
+        return lhs, eq_index, rhs, has_set, has_let
+
+    def _resolve_lhs_type(self, lhs_tokens, scope):
+        """Best-effort type resolution for the assignment LHS.
+        Returns (type_name, kind) or (None, None).
+
+        P2.6 — walks the full dotted chain `a.b.c.d`. If any hop cannot
+        be resolved (member not in UDT/class, or parent type is a
+        permissive bag like `Object`/`Variant`), returns (None, None) so
+        downstream validators skip rather than mis-typing the LHS.
+        """
+        if not lhs_tokens:
+            return None, None
+        first = lhs_tokens[0]
+        if first.type != 'IDENTIFIER':
+            return None, None
+        sym = scope.resolve(first.value)
+        if not sym:
+            return None, None
+        type_name = sym.get("type")
+        kind = sym.get("kind")
+        i = 1
+        while i + 1 < len(lhs_tokens) and lhs_tokens[i].type == 'OPERATOR' and lhs_tokens[i].value == '.':
+            member_tok = lhs_tokens[i + 1]
+            if member_tok.type != 'IDENTIFIER':
+                return None, None
+            # Bail out on permissive bag-types: the member's real type
+            # is unknowable from declaration alone.
+            if (type_name or "").lower() in ("object", "variant", "unknown", ""):
+                return None, None
+            resolved = self.resolve_member(type_name or "", member_tok.value)
+            if not resolved:
+                return None, None
+            type_name, kind, _extra = resolved
+            i += 2
+        return type_name, kind
+
+    def _validate_set_vs_let(self, tokens, scope, filename, context):
+        if not tokens:
+            return
+        parsed = self._split_assignment(tokens)
+        if not parsed:
+            return
+        lhs, _eq, _rhs, has_set, has_let = parsed  # noqa: F841
+
+        # Bare identifier (`x = …`) is the common form. Dotted chains
+        # (`obj.member = …`) are now supported via _resolve_lhs_type after
+        # P2.6 — but indexed targets (`a(0) = …`) and bang-operator LHS
+        # still require expression-level evaluation we don't model, so
+        # skip those to avoid false positives.
+        if not lhs or lhs[0].type != 'IDENTIFIER':
+            return
+        is_bare = len(lhs) == 1
+        is_dotted_chain = (
+            not is_bare
+            and all(
+                (t.type == 'IDENTIFIER') or (t.type == 'OPERATOR' and t.value == '.')
+                for t in lhs
+            )
+        )
+        if not is_bare and not is_dotted_chain:
+            return
+
+        type_name, kind = self._resolve_lhs_type(lhs, scope)
+        if type_name is None or kind is None:
+            return
+
+        kind_l = (kind or "").lower()
+        if kind_l in self._CALLABLE_KINDS:
+            return
+        if kind_l in ("enumitem", "type", "class", "property"):
+            return
+
+        line = lhs[0].line
+        display = "".join(t.value for t in lhs)
+        is_scalar = self._is_clearly_scalar(type_name)
+        is_object = self._is_clearly_object(type_name)
+
+        if has_set and is_scalar:
+            self.errors.append({
+                "file": filename,
+                "line": line,
+                "rule_id": "VBA210",
+                "severity": "error",
+                "message": (
+                    f"`Set` used on non-object target '{display}' of type '{type_name}' "
+                    f"in '{context}'. Use `Let` or assignment without `Set`."
+                ),
+            })
+            return
+
+        if not has_set and is_object and not has_let:
+            self.errors.append({
+                "file": filename,
+                "line": line,
+                "rule_id": "VBA211",
+                "severity": "error",
+                "message": (
+                    f"Object assignment to '{display}' (type '{type_name}') "
+                    f"requires `Set` in '{context}'."
+                ),
+            })
+
+    # ----------------------------------------------------------------------
+
+    def _collect_labels(self, nodes, out):
+        """Recursively walk every block under a procedure body and record
+        every line label so jump targets can be verified.
+        """
+        for node in nodes:
+            if isinstance(node, StatementNode):
+                if self.is_label(node.tokens):
+                    out.add(node.tokens[0].value.lower())
+            elif isinstance(node, IfNode):
+                self._collect_labels(node.true_block, out)
+                for _cond, blk in node.else_blocks:
+                    self._collect_labels(blk, out)
+                if node.else_block:
+                    self._collect_labels(node.else_block, out)
+            elif isinstance(node, WithNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, ForNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, DoNode):
+                self._collect_labels(node.body, out)
+            elif isinstance(node, SelectNode):
+                for case in node.cases:
+                    self._collect_labels(case.body, out)
 
     def analyze_block(self, nodes, scope, filename, context, with_stack):
         unreachable = False
@@ -145,9 +857,28 @@ class Analyzer:
                             "message": f"Unreachable code detected in '{context}'."
                         })
 
+                # Phase 2.1 — validate jump targets before normal analysis
+                # so we surface bad jumps even if expression analysis later
+                # bails out on the same line.
+                self._validate_jump_target(node.tokens, filename, context)
+
+                # Phase 2.2 — Set vs. Let on assignments
+                self._validate_set_vs_let(node.tokens, scope, filename, context)
+
+                # Phase 2.4 — Operator-type sanity (literal-only)
+                self._validate_operator_types(node.tokens, filename, context)
+
+                # Phase 3.2 — RaiseEvent target + arity
+                self._validate_raise_event(node.tokens, scope, filename, context)
+
                 # Check for Dim
                 if node.tokens and node.tokens[0].value.lower() in ('dim', 'static', 'const'):
                      self.process_dim(node.tokens, scope, filename, context, with_stack)
+                elif node.tokens and node.tokens[0].value.lower() == 'raiseevent':
+                     # Suppress regular identifier resolution on the event name
+                     # — events are only visible to their declaring class and
+                     # _validate_raise_event has already vetted them.
+                     pass
                 else:
                      self.analyze_statement(node.tokens, scope, filename, context, with_stack)
 
@@ -221,13 +952,323 @@ class Analyzer:
                 new_stack = with_stack + [expr_type or 'Unknown']
                 self.analyze_block(node.body, scope, filename, context, new_stack)
 
+            elif isinstance(node, ForNode):
+                # `For Each var In coll` and `For var = a To b [Step c]` —
+                # analyze header tokens (including loop var, range, collection)
+                # and recursively walk the body.
+                if node.header_tokens:
+                    self.analyze_statement(node.header_tokens, scope, filename, context, with_stack)
+                self.analyze_block(node.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, DoNode):
+                # Do [While|Until cond] / Do … Loop While|Until / While … Wend
+                if node.condition_tokens:
+                    self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
+                self.analyze_block(node.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, SelectNode):
+                # Selector expression
+                if node.expr_tokens:
+                    self.analyze_statement(node.expr_tokens, scope, filename, context, with_stack)
+                # Per-Case body. Case header tokens (Is < 5, 1 To 10, value list, …)
+                # are walked as expressions so type/identifier errors surface.
+                for case in node.cases:
+                    if not case.is_else and case.header_tokens:
+                        self.analyze_statement(case.header_tokens, scope, filename, context, with_stack)
+                    self.analyze_block(case.body, scope, filename, context, with_stack)
+
+            elif isinstance(node, RedimNode):
+                self._analyze_redim(node, scope, filename, context, with_stack)
+
+            elif isinstance(node, EraseNode):
+                self._analyze_erase(node, scope, filename, context, with_stack)
+
             prev_node = node
+
+    def _analyze_redim(self, node, scope, filename, context, with_stack):
+        """Validate ReDim targets:
+        - The target must resolve to an array variable (declared `Dim x()`,
+          `Dim x() As T`, or already-redimmed). Variant is permissive.
+        - Dotted targets like `ReDim This.scopes(1 To N)` walk the member
+          chain through `_resolve_lhs_type` (P2.6 chain walker) so UDT
+          and class array members are recognised.
+        - Dimension expressions must be analyzable.
+        """
+        for target in node.targets:
+            # Backwards-compatible unpack: (name_token, dim_tokens, as_type)
+            # or (name_token, dim_tokens, as_type, chain_tokens).
+            chain_tokens = None
+            if len(target) >= 4:
+                name_token, dim_tokens, _as_type, chain_tokens = target[0], target[1], target[2], target[3]
+            else:
+                name_token, dim_tokens, _as_type = target[0], target[1], target[2]
+            if name_token is None:
+                continue
+            name = name_token.value
+
+            # Dotted target: walk the chain via the P2.6 LHS resolver.
+            if chain_tokens and len(chain_tokens) > 1:
+                resolved_type, resolved_kind = self._resolve_lhs_type(chain_tokens, scope)
+                display = "".join(t.value for t in chain_tokens)
+                if resolved_type is None:
+                    # The chain root is unknown OR an intermediate hop
+                    # is permissive (Object / Variant / unloaded ref) —
+                    # in either case we can't usefully validate the
+                    # array-ness, so stay silent rather than emit a
+                    # false VBA101 on the leaf.
+                    pass
+                else:
+                    target_type = (resolved_type or "").lower()
+                    is_array = target_type.endswith("()") or "array" in target_type
+                    is_variant = target_type in ("variant", "")
+                    if not (is_array or is_variant):
+                        self.errors.append({
+                            "file": filename,
+                            "line": name_token.line,
+                            "rule_id": "VBA103",
+                            "severity": "error",
+                            "message": f"ReDim target '{display}' must be a dynamic array, got type '{resolved_type}' in '{context}'.",
+                        })
+                if dim_tokens:
+                    self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+                continue
+
+            sym = scope.resolve(name)
+            if sym is None:
+                self.errors.append({
+                    "file": filename,
+                    "line": name_token.line,
+                    "rule_id": "VBA101",
+                    "severity": "error",
+                    "message": f"Undefined identifier '{name}' in ReDim target inside '{context}'.",
+                })
+            else:
+                target_type = (sym.get("type") or "").lower()
+                kind = (sym.get("kind") or "").lower()
+                is_array = target_type.endswith("()") or "array" in target_type
+                is_variant = target_type in ("variant", "")
+                if kind not in ("variable", "expression") and kind != "":
+                    self.errors.append({
+                        "file": filename,
+                        "line": name_token.line,
+                        "rule_id": "VBA102",
+                        "severity": "error",
+                        "message": f"ReDim target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
+                    })
+                elif not (is_array or is_variant):
+                    self.errors.append({
+                        "file": filename,
+                        "line": name_token.line,
+                        "rule_id": "VBA103",
+                        "severity": "error",
+                        "message": f"ReDim target '{name}' must be a dynamic array, got type '{sym.get('type')}' in '{context}'.",
+                    })
+
+            if dim_tokens:
+                self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+
+    def _analyze_erase(self, node, scope, filename, context, with_stack):
+        """Validate Erase targets must be array variables (or Variant)."""
+        for tok in node.targets:
+            name = tok.value
+            sym = scope.resolve(name)
+            if sym is None:
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA104",
+                    "severity": "error",
+                    "message": f"Undefined identifier '{name}' in Erase target inside '{context}'.",
+                })
+                continue
+            target_type = (sym.get("type") or "").lower()
+            kind = (sym.get("kind") or "").lower()
+            is_array = target_type.endswith("()") or "array" in target_type
+            is_variant = target_type in ("variant", "")
+            if kind not in ("variable", "expression") and kind != "":
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA105",
+                    "severity": "error",
+                    "message": f"Erase target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
+                })
+            elif not (is_array or is_variant):
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA106",
+                    "severity": "error",
+                    "message": f"Erase target '{name}' must be an array, got type '{sym.get('type')}' in '{context}'.",
+                })
+
+    # ---- Phase 2.4: Operator-type compatibility (literal-only) ----------
+
+    # Strictly-arithmetic operators where a string operand is a guaranteed
+    # type error. `+` is *not* in this list because VBA coerces it
+    # bidirectionally between String and Number; `&` is string concat.
+    _ARITH_OPS = {'-', '*', '/', '\\', '^'}
+    _ARITH_KEYWORDS = {'mod'}
+
+    def _validate_operator_types(self, tokens, filename, context):
+        """Walk a statement's tokens and flag arithmetic operators that
+        sit directly between a string literal and a numeric / string
+        literal. The check is intentionally conservative — only literal
+        operands are inspected, so it never fires on variables whose
+        runtime type might be coerce-able.
+        """
+        if not tokens:
+            return
+        for i, tok in enumerate(tokens):
+            if tok.type == 'OPERATOR' and tok.value in self._ARITH_OPS:
+                self._check_arith_at(tokens, i, tok.value, filename, context)
+            elif tok.type == 'IDENTIFIER' and tok.value.lower() in self._ARITH_KEYWORDS:
+                self._check_arith_at(tokens, i, tok.value, filename, context)
+
+    def _check_arith_at(self, tokens, idx, op_text, filename, context):
+        # Find previous non-whitespace token (lhs) and next (rhs).
+        lhs = tokens[idx - 1] if idx > 0 else None
+        rhs = tokens[idx + 1] if idx + 1 < len(tokens) else None
+        if not lhs or not rhs:
+            return
+        # Skip unary `-`: previous token is itself an operator/keyword.
+        if op_text == '-':
+            if lhs.type == 'OPERATOR' and lhs.value in {'(', ',', '=', '<', '>', '+', '-', '*', '/', '\\', '^', '<>', '<=', '>='}:
+                return
+            if lhs.type == 'IDENTIFIER' and lhs.value.lower() in {
+                'and', 'or', 'not', 'xor', 'eqv', 'imp', 'mod', 'like',
+                'is', 'then', 'to', 'step', 'in', 'else',
+            }:
+                return
+
+        lhs_str = lhs.type == 'STRING'
+        rhs_str = rhs.type == 'STRING'
+        lhs_num = lhs.type in ('INTEGER', 'FLOAT', 'HEX', 'OCTAL')
+        rhs_num = rhs.type in ('INTEGER', 'FLOAT', 'HEX', 'OCTAL')
+
+        # Only fire when at least one side is a literal AND types disagree
+        # in a way arithmetic cannot reconcile.
+        if (lhs_str and rhs_num) or (lhs_num and rhs_str) or (lhs_str and rhs_str):
+            offender = lhs if lhs_str else rhs
+            self.errors.append({
+                "file": filename,
+                "line": offender.line,
+                "rule_id": "VBA240",
+                "severity": "error",
+                "message": (
+                    f"Type mismatch: arithmetic operator '{op_text}' between "
+                    f"string literal and numeric literal in '{context}'. "
+                    f"Use `&` for concatenation or `+` if you really mean "
+                    f"VBA's bidirectional coercion."
+                ),
+            })
+
+    # ----------------------------------------------------------------------
+
+    # ---- Phase 2.5: Const-expression validation -------------------------
+
+    # Built-in constant aliases shipped in the std model that *are* constants
+    # even though their entry kind happens to be "String"/"Long"/etc.
+    _CONST_KEYWORDS = {
+        'true', 'false', 'nothing', 'empty', 'null',
+    }
+    _CONST_OPERATORS = {
+        '+', '-', '*', '/', '\\', '^', '&', '=', '<>', '<', '>', '<=', '>=',
+        '(', ')', '.', ',', ':',
+    }
+    _CONST_KEYWORD_OPS = {
+        'and', 'or', 'not', 'xor', 'eqv', 'imp', 'mod', 'like',
+        'is', 'true', 'false', 'nothing', 'empty', 'null',
+    }
+
+    def _is_constant_kind(self, sym):
+        """A symbol counts as constant for the purposes of a Const RHS if
+        it is itself another Const, an Enum member, or a literal-typed
+        well-known global (vbCrLf, vbObjectError, …)."""
+        if not sym:
+            return False
+        kind = (sym.get('kind') or '').lower()
+        if kind in ('const', 'enumitem'):
+            return True
+        # Built-in scalar globals (vbCrLf, vbCritical, …) declared in
+        # std_model with a scalar type and no callable kind. They behave
+        # like constants in the VBA compiler.
+        if kind in ('string', 'long', 'integer', 'boolean', 'double', 'variant'):
+            return True
+        return False
+
+    def _validate_const_expression(self, expr_tokens, scope, filename, context, const_name):
+        """Reject Const initialisers that reference variables or call functions."""
+        if not expr_tokens:
+            return
+        i = 0
+        n = len(expr_tokens)
+        while i < n:
+            tok = expr_tokens[i]
+            if tok.type == 'IDENTIFIER':
+                low = tok.value.lower().rstrip('$')
+                # Reserved keywords that are valid in const expressions
+                if low in self._CONST_KEYWORDS or low in self._CONST_KEYWORD_OPS:
+                    i += 1
+                    continue
+
+                # Treat `<ident> ( ... )` as a function call → not constant.
+                next_is_call = (
+                    i + 1 < n
+                    and expr_tokens[i + 1].type == 'OPERATOR'
+                    and expr_tokens[i + 1].value == '('
+                )
+                sym = scope.resolve(tok.value)
+                if next_is_call:
+                    self.errors.append({
+                        "file": filename,
+                        "line": tok.line,
+                        "rule_id": "VBA230",
+                        "severity": "error",
+                        "message": (
+                            f"Const '{const_name}' initialiser calls '{tok.value}' — "
+                            f"only constant expressions are allowed."
+                        ),
+                    })
+                    return
+                if sym and not self._is_constant_kind(sym):
+                    self.errors.append({
+                        "file": filename,
+                        "line": tok.line,
+                        "rule_id": "VBA231",
+                        "severity": "error",
+                        "message": (
+                            f"Const '{const_name}' initialiser references non-constant "
+                            f"'{tok.value}' (kind={sym.get('kind')})."
+                        ),
+                    })
+                    return
+                # Unknown identifier — already reported elsewhere; no extra noise.
+            i += 1
+
+    # ----------------------------------------------------------------------
+
+    def _apply_def_type(self, name, current_type):
+        """Resolve implicit DefInt/DefStr/… typing for an untyped variable
+        whose first letter falls in the active per-module DefType map.
+        """
+        if current_type and current_type.lower() != 'variant':
+            return current_type
+        if not name or not self._current_def_type_map:
+            return current_type
+        first = name[0].lower()
+        return self._current_def_type_map.get(first, current_type)
 
     def process_dim(self, tokens, scope, filename, context, with_stack):
         # Simplified Dim parser
+        is_const = bool(tokens) and tokens[0].value.lower() == 'const'
+        symbol_kind = 'Const' if is_const else 'Variable'
+        # Track whether the current name has been given an explicit `As` —
+        # used so DefType only applies when typing was implicit.
+        explicit_as = False
         iterator = iter(tokens)
         next(iterator) # Skip Dim
-        
+
         current_name = None
         current_type = 'Variant'
         is_array = False
@@ -238,6 +1279,7 @@ class Analyzer:
             t = tokens_list[i]
             if t.type == 'IDENTIFIER':
                 if t.value.lower() == 'as':
+                    explicit_as = True
                     i += 1
                     type_parts = []
                     while i < len(tokens_list):
@@ -259,7 +1301,43 @@ class Analyzer:
                     if is_array:
                         current_type += "()"
 
-                    if current_name:
+                    # Phase 2.8 — Fixed-length String only valid at module
+                    # level (or inside UDTs). `Dim s As String * 10` inside
+                    # a procedure is a hard VBA compile error.
+                    if (
+                        current_type.lower() == "string"
+                        and i < len(tokens_list)
+                        and tokens_list[i].type == 'OPERATOR'
+                        and tokens_list[i].value == '*'
+                    ):
+                        line = tokens_list[i].line
+                        # Consume `* <length>` regardless so we don't leak
+                        # tokens into the next iteration.
+                        i += 1
+                        if i < len(tokens_list):
+                            i += 1
+                        self.errors.append({
+                            "file": filename,
+                            "line": line,
+                            "rule_id": "VBA250",
+                            "severity": "error",
+                            "message": (
+                                f"Fixed-length String declaration `As String * N` "
+                                f"is not allowed at procedure level (only in modules "
+                                f"or UDTs) for '{current_name}' in '{context}'."
+                            ),
+                        })
+
+                    # If `=` follows the As-type, leave the actual define to
+                    # the `=` branch so the assignment expression is analyzed
+                    # (and so Const-expression validation can fire).
+                    next_is_eq = (
+                        i < len(tokens_list)
+                        and tokens_list[i].type == 'OPERATOR'
+                        and tokens_list[i].value == '='
+                    )
+
+                    if current_name and not next_is_eq:
                         if current_name.lower() in scope.symbols:
                             self.errors.append({
                                 "file": filename,
@@ -267,7 +1345,7 @@ class Analyzer:
                                 "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
                             })
                         else:
-                            scope.define(current_name, current_type, 'Variable')
+                            scope.define(current_name, current_type, symbol_kind)
                         current_name = None
                         current_type = 'Variant'
                         is_array = False
@@ -275,11 +1353,14 @@ class Analyzer:
                     if current_name:
                         # Implicit Variant definition for the previous variable
                         t_type = "Variant"
+                        if not explicit_as:
+                            t_type = self._apply_def_type(current_name, t_type)
                         if is_array: t_type += "()"
-                        scope.define(current_name, t_type, 'Variable')
+                        scope.define(current_name, t_type, symbol_kind)
                         is_array = False # Reset for next
 
                     current_name = t.value
+                    explicit_as = False
                     i += 1
                     
                     # Check for Array ()
@@ -303,8 +1384,10 @@ class Analyzer:
                          })
                      else:
                          t_type = current_type
+                         if not explicit_as:
+                             t_type = self._apply_def_type(current_name, t_type)
                          if is_array and not t_type.endswith('()'): t_type += "()"
-                         scope.define(current_name, t_type, 'Variable')
+                         scope.define(current_name, t_type, symbol_kind)
 
                      # We defined the variable, now let's analyze the assignment expression
                      # We need to find where the expression ends (at comma or end of tokens)
@@ -322,10 +1405,13 @@ class Analyzer:
 
                      expr_tokens = tokens_list[expr_start:expr_end]
                      self.analyze_statement(expr_tokens, scope, filename, context, with_stack)
+                     if is_const:
+                         self._validate_const_expression(expr_tokens, scope, filename, context, current_name)
 
                      current_name = None
                      current_type = 'Variant'
                      is_array = False
+                     explicit_as = False
 
                      i = expr_end
                 else:
@@ -335,21 +1421,24 @@ class Analyzer:
                 if current_name:
                     if current_name.lower() in scope.symbols:
                         self.errors.append({
-                            "file": filename, 
+                            "file": filename,
                             "line": tokens[0].line,
                             "message": f"Duplicate declaration of identifier '{current_name}' in current scope."
                         })
                     else:
                         t_type = current_type
+                        if not explicit_as:
+                            t_type = self._apply_def_type(current_name, t_type)
                         if is_array and not t_type.endswith('()'): t_type += "()"
-                        scope.define(current_name, t_type, 'Variable')
+                        scope.define(current_name, t_type, symbol_kind)
                     current_name = None
                     current_type = 'Variant'
                     is_array = False
+                    explicit_as = False
                 i += 1
             else:
                 i += 1
-        
+
         if current_name:
              if current_name.lower() in scope.symbols:
                  self.errors.append({
@@ -359,13 +1448,27 @@ class Analyzer:
                  })
              else:
                  t_type = current_type
+                 if not explicit_as:
+                     t_type = self._apply_def_type(current_name, t_type)
                  if is_array and not t_type.endswith('()'): t_type += "()"
-                 scope.define(current_name, t_type, 'Variable')
+                 scope.define(current_name, t_type, symbol_kind)
 
     def resolve_expression_type(self, tokens, scope, with_stack):
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
 
     def analyze_statement(self, tokens, scope, filename, context, with_stack, report_errors=True):
+        # `On <expr> GoTo lbl1, lbl2, ...` (computed GoTo). Analyse the
+        # selector expression normally and skip the label list — those
+        # identifiers are validated by `_validate_jump_target`, not as
+        # value references (otherwise every label fires VBA001).
+        if tokens and tokens[0].type == 'IDENTIFIER' and tokens[0].value.lower() == 'on':
+            j = self._find_on_jump_keyword(tokens)
+            if j is not None and j >= 2:
+                self.analyze_expression_info(
+                    tokens[1:j], scope, filename, context, with_stack,
+                    report_errors=report_errors,
+                )
+                return None
         type_name, _, _ = self.analyze_expression_info(tokens, scope, filename, context, with_stack, report_errors=report_errors)
         return type_name
 
@@ -455,11 +1558,28 @@ class Analyzer:
                 # Check for Label Definition "Label:" or Named Argument "Arg:="
                 if i + 1 < len(tokens) and tokens[i+1].type == 'OPERATOR':
                     if tokens[i+1].value == ':':
-                        i += 2
-                        prev_keyword = None
-                        last_resolved_type = None
-                        last_resolved_kind = None
-                        continue
+                        # A `Label:` only exists at the START of a statement
+                        # (i == 0). In `Sub S(): Dim x: x = Foo: End Sub`
+                        # the parser hands us colon-separated statements
+                        # whose last tokens include a trailing `:` (the
+                        # statement separator). Treating every `IDENT :`
+                        # in the stream as a label-definition makes the
+                        # analyser skip identifier resolution of `Foo`,
+                        # which is the silent-failure UAT §3 caught.
+                        # Real label: only when i == 0 AND there are no
+                        # other tokens after the colon, OR the trailing
+                        # tokens are themselves just more colons.
+                        is_label_position = (i == 0)
+                        if is_label_position:
+                            i += 2
+                            prev_keyword = None
+                            last_resolved_type = None
+                            last_resolved_kind = None
+                            continue
+                        # Statement-separator colon — drop it and continue
+                        # resolving the previous identifier normally. We
+                        # do NOT advance past the colon yet; the next
+                        # iteration will handle it as an OPERATOR.
                     if tokens[i+1].value == ':=':
                         # Named Argument - skip it and the operator
                         i += 2
@@ -476,8 +1596,7 @@ class Analyzer:
                     current_module_name = next((m.name for m in self.modules if m.filename == filename), None)
                     member_type, member_kind, member_extra = self.resolve_member(last_resolved_type, name, current_module_name) or (None, None, None)
                     if not member_type:
-                        # DEBUG
-                        if last_resolved_type not in ('Object', 'Variant', 'Unknown', 'Control', 'Form'):
+                        if not self._is_permissive_chain_type(last_resolved_type):
 
                             if report_errors:
                                 self.errors.append({
@@ -855,6 +1974,59 @@ class Analyzer:
                                      "message": f"ByRef argument type mismatch. Parameter '{param_name}' expects '{param_type}', but got variable of type '{arg_type}'."
                                  })
 
+    # Names a member-chain hop must be silent about. Either intentionally
+    # permissive (Object / Variant) or carrying no resolvable member info
+    # (procedure-kind literals from host models that lack a `returns`
+    # field; qualified types whose owning library isn't loaded).
+    _PERMISSIVE_PRIMITIVES = {
+        'object', 'variant', 'unknown', 'control', 'form',
+        # Procedure-kind names that some host models emit as the type
+        # when the real return-type is unknown. Treating them as types
+        # would produce nonsense like "Member 'X' not found in type 'Sub'".
+        'sub', 'function', 'property', 'event',
+    }
+
+    def _is_permissive_chain_type(self, type_name):
+        """A chain hop on this type cannot produce a useful diagnostic.
+
+        Skips:
+          * primitive bag-types we never had information about (Object,
+            Variant, …),
+          * procedure-kind literals smuggled in as types when host
+            models lack a `returns` field (Sub / Function / Property),
+          * qualified types from libraries the analyser doesn't have
+            loaded (`ComctlLib.Node`, `MSForms.Control`, …) — i.e. the
+            namespace prefix isn't a known Project class / module and
+            isn't in the host model.
+        """
+        if not type_name:
+            return True
+        low = type_name.lower()
+        if low in self._PERMISSIVE_PRIMITIVES:
+            return True
+        # Array-type residual like "Cell()" — the `(...)` consume step
+        # should have stripped the suffix, so seeing it here means the
+        # caller is checking a type it can't navigate into.
+        if low.endswith('()'):
+            return True
+        if '.' in type_name:
+            prefix = type_name.split('.', 1)[0].lower()
+            # If the namespace prefix is neither a known project module
+            # nor a loaded reference / host class, we can't validate
+            # members on it.
+            known = False
+            if any(m.name.lower() == prefix for m in self.modules):
+                known = True
+            elif prefix in self.reference_names:
+                known = True
+            elif self.config.get_class(prefix):
+                known = True
+            elif prefix in (self.config.object_model.get("classes", {}) or {}):
+                known = True
+            if not known:
+                return True
+        return False
+
     def resolve_member(self, type_name, member_name, current_module_name=None):
         return self._resolve_member_internal(type_name, member_name, current_module_name)
 
@@ -960,11 +2132,20 @@ class Analyzer:
             members = cls_def.get("members", {})
             for m_name, m_def in members.items():
                 if m_name.lower() == member_name.lower():
-                    t = m_def.get("type", "Variant")
-                    k = 'Expression'
-                    if t in ('Sub', 'Function', 'Property'):
-                        k = 'Procedure'
-                    return t, k, m_def
+                    raw_type = m_def.get("type", "Variant")
+                    # Host models commonly encode the *kind* in `type`
+                    # (Sub / Function / Property) and the actual return
+                    # type in `returns`. If only `type` is present and
+                    # it's a procedure-kind literal, the chain after
+                    # this hop is unknowable — return Variant so the
+                    # downstream walker treats the chain as permissive
+                    # instead of asking "Member 'X' not found in type
+                    # 'Function'".
+                    if raw_type in ('Sub', 'Function', 'Property', 'Event'):
+                        ret = m_def.get("returns")
+                        t = ret if ret else 'Variant'
+                        return t, 'Procedure', m_def
+                    return raw_type, 'Expression', m_def
 
         return None
 

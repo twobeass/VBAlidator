@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://twobeass.github.io/VBAlidator/
+    about: Quickstart, rule catalogue and AI-integration guide.

@@ -1,0 +1,103 @@
+{
+  "globals": {
+    "Application": { "type": "Application" },
+    "Session": { "type": "NameSpace" },
+    "ThisOutlookSession": { "type": "Application" },
+    "olFolderInbox": { "type": "Long" },
+    "olFolderOutbox": { "type": "Long" },
+    "olFolderSentMail": { "type": "Long" },
+    "olFolderDrafts": { "type": "Long" },
+    "olFolderDeletedItems": { "type": "Long" },
+    "olFolderJunk": { "type": "Long" },
+    "olFolderCalendar": { "type": "Long" },
+    "olFolderContacts": { "type": "Long" },
+    "olFolderTasks": { "type": "Long" },
+    "olFolderNotes": { "type": "Long" },
+    "olMailItem": { "type": "Long" },
+    "olAppointmentItem": { "type": "Long" },
+    "olContactItem": { "type": "Long" },
+    "olTaskItem": { "type": "Long" },
+    "olNoteItem": { "type": "Long" },
+    "olJournalItem": { "type": "Long" },
+    "olTo": { "type": "Long" },
+    "olCC": { "type": "Long" },
+    "olBCC": { "type": "Long" },
+    "olOriginator": { "type": "Long" },
+    "olFormatPlain": { "type": "Long" },
+    "olFormatHTML": { "type": "Long" },
+    "olFormatRichText": { "type": "Long" },
+    "olImportanceLow": { "type": "Long" },
+    "olImportanceNormal": { "type": "Long" },
+    "olImportanceHigh": { "type": "Long" }
+  },
+  "classes": {
+    "Application": {
+      "members": {
+        "Session": { "type": "NameSpace" },
+        "GetNamespace": { "type": "Function", "returns": "NameSpace", "min_args": 1, "max_args": 1 },
+        "CreateItem": { "type": "Function", "returns": "Object", "min_args": 1, "max_args": 1 },
+        "CreateItemFromTemplate": { "type": "Function", "returns": "Object" },
+        "ActiveExplorer": { "type": "Function", "returns": "Object" },
+        "ActiveInspector": { "type": "Function", "returns": "Object" },
+        "Quit": { "type": "Sub" },
+        "Name": { "type": "String" },
+        "Version": { "type": "String" }
+      }
+    },
+    "NameSpace": {
+      "members": {
+        "GetDefaultFolder": { "type": "Function", "returns": "Folder", "min_args": 1, "max_args": 1 },
+        "Folders": { "type": "Object" },
+        "Logon": { "type": "Sub" },
+        "Logoff": { "type": "Sub" },
+        "GetItemFromID": { "type": "Function", "returns": "Object" },
+        "Stores": { "type": "Object" }
+      }
+    },
+    "Folder": {
+      "members": {
+        "Items": { "type": "Items" },
+        "Folders": { "type": "Object" },
+        "Name": { "type": "String" },
+        "FolderPath": { "type": "String" },
+        "Display": { "type": "Sub" }
+      }
+    },
+    "Items": {
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Object", "min_args": 1, "max_args": 1 },
+        "Find": { "type": "Function", "returns": "Object" },
+        "FindNext": { "type": "Function", "returns": "Object" },
+        "Restrict": { "type": "Function", "returns": "Items" },
+        "Sort": { "type": "Sub" },
+        "Add": { "type": "Function", "returns": "Object" },
+        "Remove": { "type": "Sub" }
+      }
+    },
+    "MailItem": {
+      "members": {
+        "Subject": { "type": "String" },
+        "Body": { "type": "String" },
+        "HTMLBody": { "type": "String" },
+        "BodyFormat": { "type": "Long" },
+        "To": { "type": "String" },
+        "CC": { "type": "String" },
+        "BCC": { "type": "String" },
+        "SenderEmailAddress": { "type": "String" },
+        "SentOn": { "type": "Date" },
+        "ReceivedTime": { "type": "Date" },
+        "Attachments": { "type": "Object" },
+        "Recipients": { "type": "Object" },
+        "Importance": { "type": "Long" },
+        "Send": { "type": "Sub" },
+        "Save": { "type": "Sub" },
+        "Display": { "type": "Sub" },
+        "Close": { "type": "Sub" },
+        "Reply": { "type": "Function", "returns": "Object" },
+        "ReplyAll": { "type": "Function", "returns": "Object" },
+        "Forward": { "type": "Function", "returns": "Object" }
+      }
+    }
+  }
+}

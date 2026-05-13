@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # do not cancel an in-flight release
+
+permissions:
+  contents: write       # tag + create releases
+  id-token: write       # OIDC for PyPI Trusted Publisher
+
+jobs:
+  release:
+    name: Semantic release
+    runs-on: ubuntu-latest
+    # Only run on the canonical branch — protects forks from publishing.
+    if: github.repository == 'twobeass/VBAlidator'
+    outputs:
+      released: ${{ steps.semrel.outputs.released }}
+      version: ${{ steps.semrel.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # python-semantic-release needs the full history to compute
+          # the bump from conventional commits.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build + release tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build python-semantic-release
+
+      - name: Run semantic-release (bump version + tag + GitHub release)
+        id: semrel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Detect whether semantic-release would publish anything.
+          if semantic-release version --print > /tmp/next.txt 2>&1; then
+            cat /tmp/next.txt
+          fi
+          # Run the publish step. `version` performs the bump+tag, and
+          # `publish` attaches build artifacts to the GitHub release.
+          semantic-release version
+          semantic-release publish || true
+          # Surface what we just released for downstream jobs.
+          if git describe --tags --abbrev=0 > /tmp/tag.txt 2>/dev/null; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            tag=$(cat /tmp/tag.txt)
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build sdist + wheel
+        if: steps.semrel.outputs.released == 'true'
+        run: python -m build
+
+      - name: Upload distribution artifacts
+        if: steps.semrel.outputs.released == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI (Trusted Publisher)
+    runs-on: ubuntu-latest
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vbalidator
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # OIDC: no API token; the project must be configured as a
+          # Trusted Publisher on PyPI pointing at this workflow.
+
+  publish-testpypi-nightly:
+    name: Publish dev-release to TestPyPI
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+      - name: Override version with .devN suffix
+        run: |
+          # Append `.devN` where N is the GitHub run number so each
+          # commit gets a unique pre-release on TestPyPI.
+          dev=".dev${{ github.run_number }}"
+          sed -i.bak -E "s/^version = \"([^\"]+)\"/version = \"\1${dev}\"/" pyproject.toml
+          rm pyproject.toml.bak
+          cat pyproject.toml | grep -E '^version'
+      - name: Build
+        run: python -m build
+      - name: Publish to TestPyPI
+        continue-on-error: true   # TestPyPI is best-effort
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true

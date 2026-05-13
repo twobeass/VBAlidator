@@ -1,0 +1,88 @@
+name: False positive
+description: VBAlidator reported an issue on code that VBE accepts.
+title: "[FP] VBA<rule>: <one-line summary>"
+labels: ["false-positive", "triage"]
+body:
+  - type: dropdown
+    id: rule_id
+    attributes:
+      label: Rule ID
+      description: Which rule fired? (`docs/rules/index.md` lists them all)
+      options:
+        - VBA001
+        - VBA002
+        - VBA003
+        - VBA004
+        - VBA005
+        - VBA006
+        - VBA007
+        - VBA008
+        - VBA009
+        - VBA010
+        - VBA101
+        - VBA102
+        - VBA103
+        - VBA104
+        - VBA105
+        - VBA106
+        - VBA201
+        - VBA210
+        - VBA211
+        - VBA221
+        - VBA222
+        - VBA223
+        - VBA224
+        - VBA230
+        - VBA231
+        - VBA240
+        - VBA250
+        - VBA300
+        - VBA310
+        - VBA320
+        - VBA330
+        - VBA340
+        - VBA341
+        - VBA_LEX001
+        - VBA_LEX002
+        - VBA_RT001
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Minimal reproducer
+      description: Smallest possible VBA snippet that reproduces the issue.
+      render: vb
+      placeholder: |
+        Attribute VB_Name = "M"
+        Option Explicit
+        Sub S()
+            ' …
+        End Sub
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host (--host flag)
+      placeholder: excel | word | access | outlook | (none)
+
+  - type: input
+    id: version
+    attributes:
+      label: VBAlidator version
+      placeholder: e.g. 0.2.0  /  ghcr.io/twobeass/vbalidator:latest
+
+  - type: textarea
+    id: vbe_says
+    attributes:
+      label: What does the actual VBE compiler say?
+      description: Paste the relevant portion of the VBE Immediate window or the IDE error dialog.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context

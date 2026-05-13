@@ -1,0 +1,107 @@
+name: Round-trip (Windows + Office)
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # nightly @ 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      sample_path:
+        description: "Path under tests/samples to round-trip (default: valid_code/)"
+        required: false
+        default: "tests/samples/valid_code"
+
+permissions:
+  contents: read
+  issues: write           # opens an issue when static ↔ dynamic disagree
+
+concurrency:
+  group: roundtrip
+  cancel-in-progress: true
+
+jobs:
+  windows-roundtrip:
+    name: VBE round-trip on Windows
+    # GitHub-hosted Windows runners ship Office only on the
+    # `windows-latest` image; the runner still needs the Office host
+    # installed (Excel here). Switch to a self-hosted runner with full
+    # Microsoft 365 if your org has a license.
+    runs-on: windows-latest
+    # Requires the Office Trust Center "Trust access to the VBA project
+    # object model" setting; failures here open an issue automatically.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + roundtrip extras
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev,roundtrip]"
+
+      - name: Skip if Office is not installed on the runner
+        id: probe
+        shell: pwsh
+        run: |
+          $reg = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" -ErrorAction SilentlyContinue
+          if ($null -eq $reg) {
+              Write-Host "::warning::Office not detected on runner — skipping round-trip."
+              "office_present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+              "office_present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Static vs. dynamic diff
+        if: steps.probe.outputs.office_present == 'true'
+        shell: pwsh
+        run: |
+          $sample = "${{ github.event.inputs.sample_path }}"
+          if (-not $sample) { $sample = "tests/samples/valid_code" }
+          python -c @"
+          import json, sys
+          from pathlib import Path
+          from src.api import precheck
+
+          target = Path(r'$sample')
+          assert target.exists(), target
+          static = precheck(target)
+          dynamic = precheck(target, roundtrip=True)
+          diff = []
+          for s, d in zip(static.issues, dynamic.issues):
+              # Anything VBE flagged that we missed:
+              pass
+          rt = [i for i in dynamic.issues if i.get('rule_id') == 'VBA_RT001']
+          missed = [i for i in rt if not any(s.get('line') == i.get('line') and s.get('file') == i.get('file') for s in static.issues)]
+          report = {
+              'sample': str(target),
+              'static_score': static.score,
+              'dynamic_score': dynamic.score,
+              'static_errors': len(static.errors),
+              'roundtrip_errors': len(rt),
+              'missed_by_static': missed,
+          }
+          Path('roundtrip_report.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report, indent=2))
+          # Fail when there are any errors VBE found that the static
+          # analyzer did not catch — that's the regression signal we
+          # actually care about.
+          sys.exit(1 if missed else 0)
+          "@
+
+      - name: Upload roundtrip report
+        if: always() && steps.probe.outputs.office_present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-report
+          path: roundtrip_report.json
+          if-no-files-found: ignore
+
+      - name: Open issue on disagreement
+        if: failure() && steps.probe.outputs.office_present == 'true' && github.event_name == 'schedule'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Round-trip disagreement: VBE caught issues the static analyser missed"
+          content-filepath: roundtrip_report.json
+          labels: bug, roundtrip-regression

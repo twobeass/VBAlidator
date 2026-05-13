@@ -1,0 +1,31 @@
+# GitHub CODEOWNERS — assign reviewers automatically.
+# Lines starting with # are comments. Order matters: later patterns win.
+
+# Project default
+*                                  @twobeass
+
+# Core analyser
+/src/analyzer.py                   @twobeass
+/src/parser.py                     @twobeass
+/src/lexer.py                      @twobeass
+/src/preprocessor.py               @twobeass
+
+# Public API surface
+/src/api.py                        @twobeass
+/src/scoring.py                    @twobeass
+/src/reporting.py                  @twobeass
+/src/rules.py                      @twobeass
+
+# Models — change with care; affects everyone using --host
+/src/models/                       @twobeass
+/src/std_model.json                @twobeass
+
+# CI / release infrastructure
+/.github/                          @twobeass
+/Dockerfile                        @twobeass
+/pyproject.toml                    @twobeass
+
+# Documentation
+/docs/                             @twobeass
+/README.md                         @twobeass
+/CHANGELOG.md                      @twobeass

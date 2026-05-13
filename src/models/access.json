@@ -1,0 +1,140 @@
+{
+  "globals": {
+    "Application": { "type": "Application" },
+    "CurrentDb": { "type": "Function", "returns": "Database", "min_args": 0, "max_args": 0 },
+    "CurrentProject": { "type": "CurrentProject" },
+    "DoCmd": { "type": "DoCmd" },
+    "Forms": { "type": "Object" },
+    "Reports": { "type": "Object" },
+    "Modules": { "type": "Object" },
+    "DBEngine": { "type": "DBEngine" },
+    "DLookup": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "DCount": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "DSum": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "DAvg": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "DMax": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "DMin": { "type": "Function", "returns": "Variant", "min_args": 2, "max_args": 3 },
+    "Nz": { "type": "Function", "returns": "Variant", "min_args": 1, "max_args": 2 },
+    "acForm": { "type": "Long" },
+    "acReport": { "type": "Long" },
+    "acTable": { "type": "Long" },
+    "acQuery": { "type": "Long" },
+    "acModule": { "type": "Long" },
+    "acMacro": { "type": "Long" },
+    "acViewNormal": { "type": "Long" },
+    "acViewDesign": { "type": "Long" },
+    "acViewPreview": { "type": "Long" },
+    "acViewPivotTable": { "type": "Long" },
+    "acFormDS": { "type": "Long" },
+    "acAdd": { "type": "Long" },
+    "acEdit": { "type": "Long" },
+    "acReadOnly": { "type": "Long" },
+    "acDialog": { "type": "Long" },
+    "acHidden": { "type": "Long" },
+    "acIcon": { "type": "Long" },
+    "acNormal": { "type": "Long" },
+    "acWindowNormal": { "type": "Long" },
+    "acSaveYes": { "type": "Long" },
+    "acSaveNo": { "type": "Long" },
+    "acSavePrompt": { "type": "Long" },
+    "dbOpenDynaset": { "type": "Long" },
+    "dbOpenSnapshot": { "type": "Long" },
+    "dbOpenTable": { "type": "Long" },
+    "dbReadOnly": { "type": "Long" },
+    "dbAppendOnly": { "type": "Long" },
+    "dbSeeChanges": { "type": "Long" }
+  },
+  "classes": {
+    "Application": {
+      "members": {
+        "CurrentDb": { "type": "Function", "returns": "Database" },
+        "CurrentProject": { "type": "CurrentProject" },
+        "DoCmd": { "type": "DoCmd" },
+        "Quit": { "type": "Sub" },
+        "Echo": { "type": "Sub" },
+        "Run": { "type": "Function", "returns": "Variant" },
+        "RunCommand": { "type": "Sub" }
+      }
+    },
+    "DoCmd": {
+      "members": {
+        "OpenForm": { "type": "Sub" },
+        "OpenReport": { "type": "Sub" },
+        "OpenQuery": { "type": "Sub" },
+        "OpenTable": { "type": "Sub" },
+        "Close": { "type": "Sub" },
+        "RunCommand": { "type": "Sub" },
+        "RunMacro": { "type": "Sub" },
+        "RunSavedImportExport": { "type": "Sub" },
+        "RunSQL": { "type": "Sub" },
+        "SetWarnings": { "type": "Sub" },
+        "GoToRecord": { "type": "Sub" },
+        "GoToControl": { "type": "Sub" },
+        "Maximize": { "type": "Sub" },
+        "Minimize": { "type": "Sub" },
+        "Restore": { "type": "Sub" },
+        "Save": { "type": "Sub" },
+        "Requery": { "type": "Sub" },
+        "TransferText": { "type": "Sub" },
+        "TransferSpreadsheet": { "type": "Sub" },
+        "TransferDatabase": { "type": "Sub" },
+        "Quit": { "type": "Sub" }
+      }
+    },
+    "Database": {
+      "members": {
+        "OpenRecordset": { "type": "Function", "returns": "Recordset", "min_args": 1, "max_args": 4 },
+        "Execute": { "type": "Sub" },
+        "Close": { "type": "Sub" },
+        "TableDefs": { "type": "Object" },
+        "QueryDefs": { "type": "Object" },
+        "Name": { "type": "String" },
+        "Version": { "type": "String" }
+      }
+    },
+    "Recordset": {
+      "members": {
+        "MoveFirst": { "type": "Sub" },
+        "MoveLast": { "type": "Sub" },
+        "MoveNext": { "type": "Sub" },
+        "MovePrevious": { "type": "Sub" },
+        "EOF": { "type": "Boolean" },
+        "BOF": { "type": "Boolean" },
+        "RecordCount": { "type": "Long" },
+        "Fields": { "type": "Object" },
+        "AddNew": { "type": "Sub" },
+        "Update": { "type": "Sub" },
+        "Edit": { "type": "Sub" },
+        "Delete": { "type": "Sub" },
+        "Close": { "type": "Sub" },
+        "Find": { "type": "Sub" },
+        "FindFirst": { "type": "Sub" },
+        "FindNext": { "type": "Sub" },
+        "FindLast": { "type": "Sub" },
+        "FindPrevious": { "type": "Sub" },
+        "Bookmark": { "type": "Variant" },
+        "NoMatch": { "type": "Boolean" }
+      }
+    },
+    "DBEngine": {
+      "members": {
+        "OpenDatabase": { "type": "Function", "returns": "Database" },
+        "Workspaces": { "type": "Object" }
+      }
+    },
+    "CurrentProject": {
+      "members": {
+        "Path": { "type": "String" },
+        "FullName": { "type": "String" },
+        "Name": { "type": "String" },
+        "Connection": { "type": "Object" },
+        "AllForms": { "type": "Object" },
+        "AllReports": { "type": "Object" }
+      }
+    }
+  },
+  "references": [
+    { "name": "DAO" },
+    { "name": "ADODB" }
+  ]
+}

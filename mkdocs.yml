@@ -1,0 +1,104 @@
+site_name: VBAlidator
+site_description: Premium VBA static analyser & compile-safety prechecker for AI-generated VBA
+site_url: https://twobeass.github.io/VBAlidator/
+repo_url: https://github.com/twobeass/VBAlidator
+repo_name: twobeass/VBAlidator
+edit_uri: edit/main/docs/
+copyright: MIT-licensed. Built for the AI-VBA generation era.
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - AI Pipeline Integration: ai-integration.md
+  - User Guide:
+      - Usage: Usage.md
+      - Configuration: Configuration.md
+      - Host models comparison: host-models-comparison.md
+      - Architecture: Architecture.md
+  - Rule catalogue:
+      - Overview: rules/index.md
+  - CI/CD: ci-cd.md
+  - UAT walkthrough: uat.md
+  - Roadmap: roadmap.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+
+# The 35 auto-generated rule pages are linked from `rules/index.md`
+# but not listed individually in the navigation. Without this block,
+# `mkdocs build --strict` would treat every rule page as
+# "documentation file present but not in navigation" and fail.
+validation:
+  nav:
+    omitted_files: ignore
+    not_found: warn
+    absolute_links: ignore
+  links:
+    not_found: warn
+    absolute_links: ignore
+    unrecognized_links: ignore
+    anchors: warn
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/twobeass/VBAlidator
+  generator: false
