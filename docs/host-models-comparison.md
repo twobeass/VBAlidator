@@ -28,7 +28,7 @@ VBA-MemoryTools, VbTrickTimer) the iter-6 + iter-7 cycles drove the
 total from **203 → 4 hard errors** (-98 %), with all four remaining
 findings being genuine upstream library bugs rather than
 analyzer false-positives. See
-[`tests/test_awesome_vba_regression.py::BASELINE`](../tests/test_awesome_vba_regression.py)
+[`tests/test_awesome_vba_regression.py::BASELINE`](https://github.com/twobeass/VBAlidator/blob/main/tests/test_awesome_vba_regression.py)
 for the per-project reasons.
 
 ## Companion COM stubs (auto-layering)
