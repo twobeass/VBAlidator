@@ -1,0 +1,70 @@
+{
+  "_doc": "Windows Script Host Shell (wshom.ocx, ProgID `WScript.Shell`) — automation of Run/Exec/SpecialFolders/Environment/Registry. Auto-layers on any source mentioning `WScript.`.",
+  "globals": {
+    "WScript": { "type": "Variant" }
+  },
+  "classes": {
+    "Shell": {
+      "type": "Class",
+      "members": {
+        "CurrentDirectory": { "type": "String" },
+        "AppActivate": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 2 },
+        "CreateShortcut": { "type": "Function", "returns": "Object", "min_args": 1, "max_args": 1 },
+        "Environment": { "type": "Function", "returns": "WshEnvironment", "min_args": 0, "max_args": 1 },
+        "Exec": { "type": "Function", "returns": "WshExec", "min_args": 1, "max_args": 1 },
+        "ExpandEnvironmentStrings": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "LogEvent": { "type": "Function", "returns": "Boolean", "min_args": 2, "max_args": 3 },
+        "Popup": { "type": "Function", "returns": "Integer", "min_args": 1, "max_args": 4 },
+        "RegDelete": { "type": "Sub", "min_args": 1, "max_args": 1 },
+        "RegRead": { "type": "Function", "returns": "Variant", "min_args": 1, "max_args": 1 },
+        "RegWrite": { "type": "Sub", "min_args": 2, "max_args": 3 },
+        "Run": { "type": "Function", "returns": "Long", "min_args": 1, "max_args": 3 },
+        "SendKeys": { "type": "Sub", "min_args": 1, "max_args": 2 },
+        "SpecialFolders": { "type": "WshSpecialFolders" }
+      }
+    },
+    "WshExec": {
+      "type": "Class",
+      "members": {
+        "ExitCode": { "type": "Long" },
+        "ProcessID": { "type": "Long" },
+        "Status": { "type": "Long" },
+        "StdErr": { "type": "Object" },
+        "StdIn": { "type": "Object" },
+        "StdOut": { "type": "Object" },
+        "Terminate": { "type": "Sub", "min_args": 0, "max_args": 0 }
+      }
+    },
+    "WshEnvironment": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 },
+        "Length": { "type": "Long" },
+        "Remove": { "type": "Sub", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "WshSpecialFolders": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "WshShortcut": {
+      "type": "Class",
+      "members": {
+        "Arguments": { "type": "String" },
+        "Description": { "type": "String" },
+        "FullName": { "type": "String" },
+        "Hotkey": { "type": "String" },
+        "IconLocation": { "type": "String" },
+        "RelativePath": { "type": "String" },
+        "TargetPath": { "type": "String" },
+        "WindowStyle": { "type": "Long" },
+        "WorkingDirectory": { "type": "String" },
+        "Save": { "type": "Sub", "min_args": 0, "max_args": 0 }
+      }
+    }
+  }
+}

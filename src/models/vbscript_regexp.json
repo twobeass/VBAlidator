@@ -1,0 +1,43 @@
+{
+  "_doc": "Microsoft VBScript Regular Expressions 5.5 (vbscript.dll, ProgID `VBScript.RegExp`). Auto-layers on any source mentioning the ProgID. Covers RegExp, Match, MatchCollection, SubMatches.",
+  "globals": {
+    "VBScript": { "type": "Variant" }
+  },
+  "classes": {
+    "RegExp": {
+      "type": "Class",
+      "members": {
+        "Pattern": { "type": "String" },
+        "IgnoreCase": { "type": "Boolean" },
+        "Global": { "type": "Boolean" },
+        "MultiLine": { "type": "Boolean" },
+        "Execute": { "type": "Function", "returns": "MatchCollection", "min_args": 1, "max_args": 1 },
+        "Replace": { "type": "Function", "returns": "String", "min_args": 2, "max_args": 2 },
+        "Test": { "type": "Function", "returns": "Boolean", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "Match": {
+      "type": "Class",
+      "members": {
+        "FirstIndex": { "type": "Long" },
+        "Length": { "type": "Long" },
+        "Value": { "type": "String" },
+        "SubMatches": { "type": "SubMatches" }
+      }
+    },
+    "MatchCollection": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "Match", "min_args": 1, "max_args": 1 }
+      }
+    },
+    "SubMatches": {
+      "type": "Class",
+      "members": {
+        "Count": { "type": "Long" },
+        "Item": { "type": "Function", "returns": "String", "min_args": 1, "max_args": 1 }
+      }
+    }
+  }
+}

@@ -24,7 +24,7 @@
     git clone https://github.com/twobeass/VBAlidator
     cd VBAlidator
     pip install -e ".[dev]"
-    pytest                       # 148 tests
+    pytest                       # 259 tests
     ```
 
 ## CLI
@@ -40,7 +40,7 @@ that is walked recursively.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--host {excel,word,access,outlook}` | _none_ | Auto-load the bundled host model so `Workbook`, `Document`, `Recordset`, etc. resolve out of the box. |
+| `--host {excel,word,access,outlook,visio,mscomctl,msforms,scripting,vbscript_regexp,wscript_shell,shell_application}` | _none_ | Auto-load the bundled host model. The five Office hosts (excel/word/access/visio/outlook) need to be set explicitly; the six COM-companion stubs (mscomctl/msforms/scripting/vbscript_regexp/wscript_shell/shell_application) **auto-layer** when the scan set mentions their ProgID / namespace — explicit `--host` rarely needed for those. See [Configuration → Bundled host models](Configuration.md#bundled-host-models). |
 | `--model PATH` | `vba_model.json` if present | Custom JSON object model. Layered on top of the std model and any `--host` model. |
 | `--define KEY=VAL,KEY2=VAL2` | _none_ | Conditional-compilation constants. Override `WIN64` / `VBA7` to force 32-bit mode. |
 | `--score-threshold N` | `90` | Minimum score for a clean exit. |
@@ -85,7 +85,7 @@ from vbalidator import precheck, PrecheckResult
 
 result: PrecheckResult = precheck(
     source="./MyModules",        # str | Path | inline source
-    host="excel",                # excel | word | access | outlook | None
+    host="excel",                # excel|word|access|outlook|visio|mscomctl|msforms|scripting|vbscript_regexp|wscript_shell|shell_application|None
     model_path="my.json",        # extra custom model
     defines={"WIN64": False},
     strict=True,                 # warnings count toward score

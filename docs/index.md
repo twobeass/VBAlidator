@@ -21,8 +21,12 @@ straight into any CI pipeline or LLM-VBA validator stack.
   sees the code.
 - **Optional dynamic verification.** With `--roundtrip` (Windows + Office)
   the static analyser is cross-checked against the actual VBE compiler.
-- **Bundled host models.** `--host excel|word|access|outlook` ships the
-  matching object model so you don't need to run a COM exporter first.
+- **Bundled host models + auto-layering.** `--host
+  excel|word|access|outlook|visio` ships the matching Office object
+  model (Excel/Word/Access/Visio are full-fidelity, 1–3 MB each).
+  Six COM companion stubs (`mscomctl`/`msforms`/`scripting`/
+  `vbscript_regexp`/`wscript_shell`/`shell_application`) auto-layer
+  on top whenever the scan set mentions their ProgID — no extra flag.
 - **Stable rule IDs.** Every finding carries a `VBA<id>` you can pin in
   CI ignore lists. The catalogue at [Rules](rules/index.md) documents
   each one with a Failing example, a Compliant example and a fix hint.
