@@ -480,6 +480,35 @@ End Sub
     )
 
 
+def test_default_property_item_call_through_collection_member(run_source):
+    """`obj.children(idx)` where `children` is a 0-arg property returning
+    a Collection-like type must NOT flag "Argument count mismatch for
+    'children': Expected at most 0, got 1." VBA implicitly rewrites the
+    indexed access to `obj.children.Item(idx)` via Collection's default
+    property. Regression for stdAcc.cls's
+    `Set acc = acc.children(CLng(descendants(i)))`."""
+    code = """
+VERSION 1.0 CLASS
+Attribute VB_Name = "C"
+Option Explicit
+Public Property Get children() As Collection
+    Set children = New Collection
+End Property
+
+Sub S()
+    Dim c As C: Set c = New C
+    Dim child As Object
+    Set child = c.children(1)
+End Sub
+"""
+    result = run_source(code, module_type="Class")
+    arg_errors = [e for e in result.errors if "Argument count mismatch for 'children'" in (e.get("message") or "")]
+    assert not arg_errors, (
+        f"`x.children(idx)` must resolve via Collection's default Item. "
+        f"Got: {arg_errors!r}"
+    )
+
+
 def test_array_accepts_unlimited_args(run_source):
     """VBA's `Array()` is a ParamArray — callers may pass arbitrarily
     many values. Regression for stdAcc's `CreateLookupDict(Array(...))`
