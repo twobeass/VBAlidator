@@ -71,11 +71,15 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false   # keeps the manifest small
 
+      - name: Compute short SHA (matches docker/metadata-action sha-<short> tag)
+        id: shortsha
+        run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Trivy scan (HIGH+CRITICAL fail the build)
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ github.sha }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ steps.shortsha.outputs.value }}
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
@@ -88,16 +92,19 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
+      - name: Compute short SHA (matches docker/metadata-action sha-<short> tag)
+        id: shortsha
+        run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - name: Pull & run --help
         run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ github.sha }}
-          docker run --rm ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ github.sha }} --help
+          docker pull ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ steps.shortsha.outputs.value }}
+          docker run --rm ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ steps.shortsha.outputs.value }} --help
       - name: Run on demo fixtures (expects non-zero exit)
         run: |
           set +e
           docker run --rm \
             -v "${{ github.workspace }}/tests/demo:/workspace" \
-            ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ github.sha }} \
+            ghcr.io/${{ github.repository_owner }}/vbalidator:sha-${{ steps.shortsha.outputs.value }} \
             /workspace --quiet --output /workspace/report.json
           ec=$?
           if [ "$ec" -eq 0 ]; then
