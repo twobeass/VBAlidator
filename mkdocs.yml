@@ -45,6 +45,7 @@ theme:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - GitHub Actions integration: github-actions.md
   - AI Pipeline Integration: ai-integration.md
   - User Guide:
       - Usage: Usage.md

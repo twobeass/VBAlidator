@@ -54,10 +54,21 @@ into any CI step.
 
 ## CI usage
 
+The 5-line gate for any VBA repo:
+
 ```yaml
-# GitHub Actions
-- run: pip install vbalidator
-- run: vbalidator ./vba --host excel --score-threshold 90
+# .github/workflows/vba-precheck.yml
+name: VBA precheck
+on: [push, pull_request]
+jobs:
+  precheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install vbalidator
+      - run: vbalidator ./vba --host excel --score-threshold 90
 ```
 
 ```yaml
@@ -67,6 +78,11 @@ vbalidator:
   script:
     - vbalidator . --host excel
 ```
+
+See [GitHub Actions integration](github-actions.md) for the full
+recipe set — path-filtering, JSON-report artifact upload, PR-level
+inline annotations, multi-host matrix, step-summary verdicts, custom
+models, status badges.
 
 ## Python API
 

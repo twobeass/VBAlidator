@@ -55,6 +55,8 @@ print(f"score = {result.score}/100")
 ## Where to next
 
 - [Quickstart](quickstart.md) — install, scan, ship in five minutes.
+- [GitHub Actions integration](github-actions.md) — drop VBAlidator
+  into the CI of any VBA repo with copy-paste workflow recipes.
 - [AI Pipeline Integration](ai-integration.md) — drop `precheck()`
   behind any LLM-VBA generator.
 - [Rule catalogue](rules/index.md) — every emitted finding documented.
