@@ -60,18 +60,20 @@ def main():
     )
     parser.add_argument(
         "--host",
-        choices=["excel", "word", "access", "outlook", "visio", "mscomctl"],
+        choices=["excel", "word", "access", "outlook", "visio", "mscomctl", "msforms"],
         help="Built-in host model to load (Excel/Word/Access/Outlook/Visio/"
-             "MSComCtl). When set, the bundled models/<host>.json is layered "
-             "on top of the standard model so the user does not need to run "
+             "MSComCtl/MSForms). Bundled models/<host>.json is layered on "
+             "top of the standard model so the user does not need to run "
              "the VBA_Model_Exporter.bas first. Excel/Word/Access/Visio are "
-             "full-fidelity models generated from real Office type libraries; "
-             "MSComCtl ships the Microsoft Common Controls (TreeView, "
-             "ListView, ProgressBar, …) and is auto-layered when any `.frm` "
-             "in the scan set references the library — explicit `--host "
-             "mscomctl` is rarely needed. Outlook is a minimal hand-curated "
-             "stub (the COM/TLB path is "
-             "GPO-blocked on most managed installs).",
+             "full-fidelity models from real Office type libraries; MSComCtl "
+             "ships the Microsoft Common Controls (TreeView/ListView/…) and "
+             "auto-layers when any `.frm` references the library; MSForms 2.0 "
+             "ships UserForm + the standard controls (CommandButton/TextBox/"
+             "Frame/MultiPage/…) and auto-layers when any source file "
+             "references the `MSForms.` namespace — explicit `--host "
+             "mscomctl|msforms` is rarely needed. Outlook is a minimal "
+             "hand-curated stub (the COM/TLB path is GPO-blocked on most "
+             "managed installs).",
     )
     parser.add_argument(
         "--output",
