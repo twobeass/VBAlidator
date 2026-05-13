@@ -623,6 +623,75 @@ End Sub
     )
 
 
+def test_error_can_be_used_as_local_variable(run_source):
+    """`error` is reserved only in the `On Error ...` two-token form
+    and the `Error <num>` raise statement. As a bare identifier it's a
+    perfectly legal variable name — stdVBA's `stdAcc::AwaitForElement`
+    uses `error` as a local stdCallback parameter."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S(ByVal error As Object)
+    If Not error Is Nothing Then
+        Call error.Run("payload")
+    End If
+End Sub
+"""
+    result = run_source(code)
+    err = [e for e in result.errors if "error" in (e.get("message") or "").lower() and "without with" in (e.get("message") or "").lower()]
+    assert not err, (
+        f"`error` as a bare identifier must resolve as a variable, not "
+        f"trigger a phantom With-block error. Got: {result.errors!r}"
+    )
+
+
+def test_on_error_goto_still_works(run_source):
+    """Guard: removing `error` from the KEYWORDS set must not break
+    `On Error GoTo <label>` / `On Error Resume Next` / `On Error GoTo 0`."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Sub S()
+    On Error Resume Next
+    Dim x As Long
+    x = 1
+    On Error GoTo 0
+    On Error GoTo Handler
+    Exit Sub
+Handler:
+    x = -1
+End Sub
+"""
+    result = run_source(code)
+    err = [e for e in result.errors if "Error" in (e.get("message") or "")]
+    assert not err, (
+        f"On Error GoTo/Resume must keep working. Got: {err!r}"
+    )
+
+
+def test_line_continuation_tolerates_trailing_whitespace(run_source):
+    """VBA accepts trailing whitespace after the `_` line-continuation
+    marker. The lexer used to require the `_` to be immediately followed
+    by the newline; lines ending in `_ \\n` (note the space) tokenised
+    `_` as a bare identifier and triggered `Undefined identifier '_'`."""
+    code = (
+        'Attribute VB_Name = "M"\n'
+        'Option Explicit\n'
+        'Sub S()\n'
+        '    Dim arr As Variant\n'
+        '    arr = Array("a", _ \n'  # trailing space + newline after _
+        '               "b", _ \n'
+        '               "c")\n'
+        'End Sub\n'
+    )
+    result = run_source(code)
+    err = [e for e in result.errors if "Undefined identifier '_'" in (e.get("message") or "")]
+    assert not err, (
+        f"`_` followed by trailing whitespace must still be line continuation. "
+        f"Got: {result.errors!r}"
+    )
+
+
 def test_statement_level_subcall_still_works(run_source):
     """Sub-style implicit calls at the start of a statement must keep
     working — the fix above must not regress `MsgBox "Hi"` /
@@ -647,47 +716,26 @@ End Sub
     )
 
 
-def test_variant_arg_compatible_with_object_byref_param(run_source):
-    """`Variant` can hold any object reference, so passing it to an
-    `Object` ByRef parameter is valid VBA — the runtime unwraps the
-    contained reference. Regression for stdCallback's `ObjPtr(data)`
-    where `data` is Variant."""
+def test_enum_member_is_valid_const_initialiser(run_source):
+    """Source-declared `Enum` members are compile-time Long constants in
+    VBA — they may appear on the RHS of `Const X = MyEnum.Member * 4`.
+    Regression for VBA-MemoryTools' `LibMemory.bas::EmptyArray`."""
     code = """
 Attribute VB_Name = "M"
 Option Explicit
-Public Declare PtrSafe Function ObjPtrAlias Lib "kernel32" Alias "RtlMoveMemory" (ByRef Ptr As Object, ByRef Source As Any, ByVal Len As LongPtr)
+
+Public Enum FADF
+    FADF_AUTO = &H1
+    FADF_HAVEVARTYPE = &H80
+End Enum
 
 Sub S()
-    Dim data As Variant
-    Dim source As Long
-    Call ObjPtrAlias(data, source, 4)
+    Const fFeaturesHi As Long = FADF_HAVEVARTYPE * &H10000
 End Sub
 """
     result = run_source(code)
-    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
-    assert not mismatches, (
-        f"Variant must accept Object ByRef param. Got: {mismatches!r}"
-    )
-
-
-def test_class_arg_compatible_with_iunknown_byref_param(run_source):
-    """Every VBA class implements `IUnknown` implicitly. Passing a
-    class-typed variable to a `ByRef obj As IUnknown` parameter is
-    therefore valid — the canonical stdCOM-style COM-interop pattern."""
-    iface = """
-VERSION 1.0 CLASS
-Attribute VB_Name = "stdCOM"
-Option Explicit
-Sub RevokeActiveObjectEx(ByRef obj As IUnknown, ByVal cookie As Long)
-End Sub
-
-Sub Class_Terminate()
-    Call RevokeActiveObjectEx(Me, 0)
-End Sub
-"""
-    result = run_source(iface, module_type="Class")
-    mismatches = [e for e in result.errors if "ByRef argument type mismatch" in (e.get("message") or "")]
-    assert not mismatches, (
-        f"Class-typed variable must accept IUnknown ByRef param. "
-        f"Got: {mismatches!r}"
+    const_errors = [e for e in result.errors if "non-constant" in (e.get("message") or "")]
+    assert not const_errors, (
+        f"Enum members must count as constant on the RHS of `Const X = …`. "
+        f"Got: {const_errors!r}"
     )

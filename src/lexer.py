@@ -206,7 +206,11 @@ class Lexer:
             ('OCTAL', r'&O[0-7]+[&%@!#]?'),
             ('FLOAT', r'(?:(?:\d+\.\d*|\.\d+|\d+)[eEdD][+\-]?\d+|\d+\.\d+)[#!@]?'),
             ('INTEGER', r'\d+[&%@!#]?'),
-            ('LINE_CONTINUATION', r'[ \t]+_(\r\n|\n)'), # Handle line continuation
+            # Line continuation — `_` must be preceded by whitespace, but
+            # VBA tolerates trailing whitespace (and an inline `'` comment
+            # is technically permitted before the newline; we keep it
+            # simple and only swallow whitespace).
+            ('LINE_CONTINUATION', r'[ \t]+_[ \t]*(\r\n|\n)'),
             ('NEWLINE', r'(\r\n|\n)'), # Removed : from newline
             ('SKIP', r'[ \t]+'),
             ('OPERATOR', r'<>|<=|>=|:=|[+\-*/^=&<>\(\)\.,:\\!]'), # Added : \ ! to operator

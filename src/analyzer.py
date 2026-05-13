@@ -110,7 +110,12 @@ class Analyzer:
             if mod.module_type == 'Module':
                 for var in mod.variables:
                     if var.scope.lower() in ('public', 'global', 'friend'):
-                        kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                        if getattr(var, 'is_enum_member', False):
+                            kind = 'EnumItem'
+                        elif getattr(var, 'is_const', False):
+                            kind = 'Const'
+                        else:
+                            kind = 'Variable'
                         self.global_scope.define(var.name, var.type_name, kind)
                 
                 for proc in mod.procedures:
@@ -135,7 +140,12 @@ class Analyzer:
             mod_scope = SymbolTable(mod.name, parent=self.global_scope, scope_type=mod.module_type)
 
             for var in mod.variables:
-                kind = 'Const' if getattr(var, 'is_const', False) else 'Variable'
+                if getattr(var, 'is_enum_member', False):
+                    kind = 'EnumItem'
+                elif getattr(var, 'is_const', False):
+                    kind = 'Const'
+                else:
+                    kind = 'Variable'
                 mod_scope.define(var.name, var.type_name, kind)
             for proc in mod.procedures:
                 mod_scope.define(proc.name, proc.return_type, 'Procedure', extra=proc)
@@ -1006,6 +1016,16 @@ class Analyzer:
                 continue
             name = name_token.value
 
+            # Leading-dot target — `ReDim .points(1 To N)` inside a
+            # `With X` block. We can't usefully walk the chain without
+            # the with-stack anchor's actual UDT/Class, so stay silent
+            # instead of emitting a phantom "Undefined identifier" on
+            # the bare member name.
+            if chain_tokens and chain_tokens[0].type == 'OPERATOR' and chain_tokens[0].value == '.':
+                if dim_tokens:
+                    self.analyze_statement(dim_tokens, scope, filename, context, with_stack)
+                continue
+
             # Dotted target: walk the chain via the P2.6 LHS resolver.
             if chain_tokens and len(chain_tokens) > 1:
                 resolved_type, resolved_kind = self._resolve_lhs_type(chain_tokens, scope)
@@ -1069,13 +1089,44 @@ class Analyzer:
 
     def _analyze_erase(self, node, scope, filename, context, with_stack):
         """Validate Erase targets must be array variables (or Variant)."""
-        for tok in node.targets:
-            name = tok.value
+        for target in node.targets:
+            # Backwards-compat: legacy parse_erase emitted a bare Token;
+            # current parser emits a list (single-Token list for bare names,
+            # longer for dotted chains like `Erase This.Leaf.points`).
+            if isinstance(target, list):
+                chain = target
+            else:
+                chain = [target]
+            first_tok = chain[0]
+            name = first_tok.value
+
+            # Dotted target: walk the chain through `_resolve_lhs_type`.
+            # An unresolvable hop returns (None, None) — stay silent in
+            # that case (member chain may pass through a permissive bag
+            # type like Variant/Object that we can't introspect).
+            if len(chain) > 1:
+                resolved_type, _kind = self._resolve_lhs_type(chain, scope)
+                if resolved_type is None:
+                    continue
+                target_type = (resolved_type or "").lower()
+                is_array = target_type.endswith("()") or "array" in target_type
+                is_variant = target_type in ("variant", "")
+                display = "".join(t.value for t in chain)
+                if not (is_array or is_variant):
+                    self.errors.append({
+                        "file": filename,
+                        "line": first_tok.line,
+                        "rule_id": "VBA106",
+                        "severity": "error",
+                        "message": f"Erase target '{display}' must be an array, got type '{resolved_type}' in '{context}'.",
+                    })
+                continue
+
             sym = scope.resolve(name)
             if sym is None:
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA104",
                     "severity": "error",
                     "message": f"Undefined identifier '{name}' in Erase target inside '{context}'.",
@@ -1088,7 +1139,7 @@ class Analyzer:
             if kind not in ("variable", "expression") and kind != "":
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA105",
                     "severity": "error",
                     "message": f"Erase target '{name}' is not an array variable (kind={sym.get('kind')}) in '{context}'.",
@@ -1096,7 +1147,7 @@ class Analyzer:
             elif not (is_array or is_variant):
                 self.errors.append({
                     "file": filename,
-                    "line": tok.line,
+                    "line": first_tok.line,
                     "rule_id": "VBA106",
                     "severity": "error",
                     "message": f"Erase target '{name}' must be an array, got type '{sym.get('type')}' in '{context}'.",
@@ -1457,6 +1508,19 @@ class Analyzer:
         return self.analyze_statement(tokens, scope, "", "", with_stack, report_errors=False)
 
     def analyze_statement(self, tokens, scope, filename, context, with_stack, report_errors=True):
+        # `On Error GoTo <label>` / `On Error Resume Next` / `On Error
+        # GoTo 0|-1` — fully validated by `_validate_jump_target`. Don't
+        # re-walk the token stream as a value-bearing expression or
+        # `Error` would be treated as a bare identifier (which it is in
+        # other VBA contexts — see the comment in `analyze_expression_info`'s
+        # KEYWORDS set — but here it's part of the On-Error syntax).
+        if (
+            tokens and tokens[0].type == 'IDENTIFIER' and tokens[0].value.lower() == 'on'
+            and len(tokens) >= 2 and tokens[1].type == 'IDENTIFIER'
+            and tokens[1].value.lower() == 'error'
+        ):
+            return None
+
         # `On <expr> GoTo lbl1, lbl2, ...` (computed GoTo). Analyse the
         # selector expression normally and skip the label list — those
         # identifiers are validated by `_validate_jump_target`, not as
@@ -1474,13 +1538,19 @@ class Analyzer:
 
     def analyze_expression_info(self, tokens, scope, filename, context, with_stack, report_errors=True, allow_implicit_call=True):
         KEYWORDS = {
-            'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit', 
-            'on', 'error', 'goto', 'resume', 'do', 'loop', 'while', 'wend', 
+            'set', 'call', 'if', 'then', 'else', 'elseif', 'end', 'exit',
+            # `error` is intentionally NOT here — VBA reserves it only in
+            # the two-token forms `On Error ...` (handled by the dedicated
+            # `on` + lookahead branch above analyze_statement) and `Error
+            # <number>` raise-statement. Anywhere else it's a perfectly
+            # valid identifier (and stdVBA's `stdAcc::AwaitForElement`
+            # uses it as a local variable name).
+            'on', 'goto', 'resume', 'do', 'loop', 'while', 'wend',
             'for', 'next', 'select', 'case', 'with', 'to', 'step', 'in',
             'byval', 'byref', 'optional', 'paramarray', 'true', 'false',
             'nothing', 'empty', 'null',
-            'not', 'each', 'sub', 'function', 'property', 'const', 'dim', 'as', 
-            'type', 'boolean', 'integer', 'string', 'variant', 'object', 
+            'not', 'each', 'sub', 'function', 'property', 'const', 'dim', 'as',
+            'type', 'boolean', 'integer', 'string', 'variant', 'object',
             'byte', 'long', 'single', 'double', 'currency', 'date', 'decimal',
             'and', 'or', 'xor', 'is', 'like', 'typeof', 'mod', 'new', 'print',
             'open', 'close', 'input', 'output', 'append', 'binary', 'random',

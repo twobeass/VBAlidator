@@ -204,8 +204,12 @@ End Sub
     proc = _parse(code).procedures[0]
     erases = [n for n in proc.body if isinstance(n, EraseNode)]
     assert len(erases) == 1
+    # Each target is a chain (list of tokens) so dotted forms like
+    # `Erase This.Leaf.points` carry the full path; bare `arr` is a
+    # single-token chain.
     assert len(erases[0].targets) == 1
-    assert erases[0].targets[0].value.lower() == "arr"
+    chain = erases[0].targets[0]
+    assert len(chain) == 1 and chain[0].value.lower() == "arr"
 
 
 def test_string_suffix_resolves(run_source):
@@ -242,6 +246,61 @@ def test_unexpected_character_still_reports_error():
     list(lex.tokenize())
     assert any(e.char == "€" for e in lex.errors), (
         f"Euro sign must still surface as lexer error. Errors: {[e.char for e in lex.errors]!r}"
+    )
+
+
+def test_erase_walks_member_chain(run_source):
+    """`Erase This.Leaf.points` must walk the chain through the UDT
+    member, not flag the root identifier `This` as a non-array."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Private Type TLeaf
+    points() As Long
+End Type
+Private Type TThis
+    Leaf As TLeaf
+End Type
+Private This As TThis
+Sub S()
+    Erase This.Leaf.points
+End Sub
+"""
+    result = run_source(code)
+    erase_errors = [e for e in result.errors if "Erase target" in (e.get("message") or "")]
+    assert not erase_errors, (
+        f"Erase must walk dotted chains. Got: {erase_errors!r}"
+    )
+
+
+def test_redim_leading_dot_inside_with_block(run_source):
+    """`ReDim .points(1 To N)` inside a `With X` block must not flag
+    `.points` as an undefined identifier — the leading dot is the
+    With-block member-access form."""
+    code = """
+Attribute VB_Name = "M"
+Option Explicit
+Private Type TLeaf
+    points() As Long
+End Type
+Private Type TThis
+    Leaf As TLeaf
+End Type
+Private This As TThis
+Sub S()
+    With This.Leaf
+        ReDim .points(1 To 10)
+    End With
+End Sub
+"""
+    result = run_source(code)
+    redim_errors = [
+        e for e in result.errors
+        if "ReDim target" in (e.get("message") or "")
+        or "Undefined identifier 'points'" in (e.get("message") or "")
+    ]
+    assert not redim_errors, (
+        f"With-block leading-dot ReDim target must not flag. Got: {redim_errors!r}"
     )
 
 
