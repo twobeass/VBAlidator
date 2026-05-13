@@ -53,11 +53,15 @@ jobs:
           # `publish` attaches build artifacts to the GitHub release.
           semantic-release version
           semantic-release publish || true
-          # Surface what we just released for downstream jobs.
-          if git describe --tags --abbrev=0 > /tmp/tag.txt 2>/dev/null; then
+          # `released=true` iff semantic-release actually moved HEAD onto
+          # a freshly created tag. Checking `git describe` alone is wrong:
+          # it always finds the latest tag in history (e.g. an older
+          # v1.0.0) and would re-trigger publish on every chore/docs push,
+          # producing PyPI "File already exists" 400s.
+          new_tag=$(git tag --points-at HEAD 2>/dev/null | head -n1 || true)
+          if [ -n "$new_tag" ]; then
             echo "released=true" >> "$GITHUB_OUTPUT"
-            tag=$(cat /tmp/tag.txt)
-            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "version=${new_tag#v}" >> "$GITHUB_OUTPUT"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
