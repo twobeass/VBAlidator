@@ -1,8 +1,6 @@
 """Phase 2.11 — loop / label context (VBA170-VBA175)."""
 from __future__ import annotations
 
-import pytest
-
 
 def _ids(result):
     return {e.get("rule_id") for e in result.errors}
