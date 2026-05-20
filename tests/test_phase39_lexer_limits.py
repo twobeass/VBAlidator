@@ -41,3 +41,12 @@ def test_line_too_long(run_source):
 def test_normal_line_ok(run_source):
     r = run_source("Sub S()\n    x = 1 + 2 + 3\nEnd Sub\n")
     assert "VBA_LEX006" not in _ids(r)
+
+
+def test_unterminated_string_does_not_swallow_following_lines(run_source):
+    # Regression for the STRING regex that used to match across newlines:
+    # an unterminated string must NOT pair with a quote on a later line and
+    # mask the error. Each unterminated quote must surface VBA_LEX004.
+    src = 'Sub S()\n    a = "x\n    b = "y\n    c = 5\nEnd Sub\n'
+    r = run_source(src)
+    assert "VBA_LEX004" in _ids(r)

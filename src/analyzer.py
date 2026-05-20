@@ -2442,19 +2442,24 @@ class Analyzer:
             return bool(p.get('is_paramarray', False))
         return bool(getattr(p, 'is_paramarray', False))
 
-    def _validate_named_args(self, args, param_defs, name, filename, line, context):
+    def _validate_named_args(self, args, param_defs, name, filename, line, context,
+                             is_source_proc=False):
         """VBA140/141/142 — validate `name:=value` call arguments.
 
         - VBA141 (duplicate) is purely syntactic.
-        - VBA140 (unknown name) only fires when the target's parameter names
-          are reliably known (a scanned-source procedure), to avoid false
-          positives against under-modelled host APIs.
+        - VBA140 (unknown name) only fires for scanned-source procedures
+          (`is_source_proc`) whose parameter names are authoritative. Host-
+          model parameter names are advisory (they can abbreviate or rename
+          the real API, e.g. `Range.Find(What:=…)`), so VBA140 is suppressed
+          for them to avoid false positives.
         - VBA142 — a procedure with a ParamArray cannot be called with named
           arguments.
         """
         param_names = {self._param_name(p) for p in (param_defs or [])}
         param_names.discard(None)
         has_param_array = any(self._param_is_paramarray(p) for p in (param_defs or []))
+        all_named = is_source_proc and bool(param_defs) and all(
+            self._param_name(p) for p in param_defs)
 
         seen = set()
         any_named = False
@@ -2471,7 +2476,7 @@ class Analyzer:
                         "message": f"Named argument '{nm}' specified more than once in call to '{name}'.",
                     })
                 seen.add(low)
-                if param_names and low not in param_names:
+                if all_named and low not in param_names:
                     self.errors.append({
                         "file": filename, "line": line,
                         "rule_id": "VBA140", "severity": "error",
@@ -2529,8 +2534,12 @@ class Analyzer:
              if 'args' in extra:
                  param_defs = extra['args']
 
-        # Phase 2.9 — named-argument validation (VBA140/141/142)
-        self._validate_named_args(args, param_defs, name, filename, line, context)
+        # Phase 2.9 — named-argument validation (VBA140/141/142). VBA140
+        # (unknown name) only for scanned-source procedures whose parameter
+        # names are authoritative; host-model param names are advisory.
+        self._validate_named_args(
+            args, param_defs, name, filename, line, context,
+            is_source_proc=isinstance(extra, ProcedureNode))
 
         if arg_count < min_args:
              self.errors.append({

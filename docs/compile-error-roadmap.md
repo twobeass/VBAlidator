@@ -117,10 +117,13 @@ die Variable des schließenden `Next` (inkl. `Next j, i`-Mehrfachschließung).
 | VBA174 | For Each control variable must be Variant/object | `For Each i` mit `i As Long` o. ä. |
 | VBA175 | Duplicate label | Label zweimal in derselben Prozedur |
 
-**Bekannte Einschränkung:** Die `Next j, i`-Mehrfachschließung wird vom Parser
-nur am innersten Loop verarbeitet; die äußere Schleife kann dadurch ein
-fehlerhaftes VBA110 erzeugen (selten in der Praxis, im Test-Korpus nicht
-vorhanden). VBA172 ist daher bewusst auf die Einzel-`Next`-Form beschränkt.
+**`Next j, i`-Mehrfachschließung:** im Review behoben. Der innerste `parse_for`
+konsumiert die komplette Variablenliste und merkt sich über
+`self._pending_next_closes`, wie viele *umschließende* Schleifen mitgeschlossen
+wurden; `parse_block` beendet die betroffenen Frames sauber, sodass kein
+fälschliches VBA110/VBA119 entsteht (Tests in
+`test_phase15_block_terminators.py`). VBA172 bleibt bewusst auf die Einzel-
+`Next`-Form beschränkt (Mehrfachform hat keinen eindeutigen Einzelbezug).
 
 **Tests:** `tests/test_phase211_loop_label.py` (12 Fälle inkl. Gegenbeispiele),
 Fixtures in `tests/samples/compile_errors/loop_label/`. FP-Wächter grün.
@@ -283,9 +286,11 @@ Abgeschlossen. Neuer Helfer `_validate_named_args`, aufgerufen aus
 | VBA141 | Named argument specified more than once | doppeltes `name:=` im selben Aufruf (rein syntaktisch) |
 | VBA142 | Named arguments with ParamArray | benannte Argumente bei `ParamArray`-Prozedur |
 
-**FP-Schutz:** VBA140 feuert nur, wenn die Parameternamen verlässlich bekannt
-sind (gescannte Quell-Prozedur); gegen untermodellierte Host-APIs wird nicht
-gemeldet. VBA141 ist rein syntaktisch.
+**FP-Schutz (im Review verschärft):** VBA140 feuert ausschließlich für
+gescannte Quell-Prozeduren (`isinstance(extra, ProcedureNode)`). Host-Modell-
+Parameternamen sind nur beratend (sie können den echten API-Namen abkürzen/
+umbenennen, z. B. `Range.Find(What:=…)`) und lösen daher kein VBA140 aus.
+VBA141 ist rein syntaktisch.
 
 **Bekannte Einschränkung:** validiert wird nur die geklammerte Aufrufform
 (`Foo(a:=1)`); die klammerlose Statement-Form (`Foo a:=1`) erreicht

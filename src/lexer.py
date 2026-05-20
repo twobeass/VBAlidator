@@ -186,7 +186,7 @@ class Lexer:
         # used heavily in Excel/host integration.
         self.token_specs = [
             ('COMMENT', r"'.*"),
-            ('STRING', r'"(""|[^"])*"'),
+            ('STRING', r'"(""|[^"\r\n])*"'),
             # DATELITERAL must come before PREPROCESSOR — both start with `#`
             # and the regex engine takes the first match in the alternation,
             # so PREPROCESSOR's `#[a-zA-Z_]\w*` would otherwise eat

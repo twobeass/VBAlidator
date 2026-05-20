@@ -71,3 +71,38 @@ def test_balanced_blocks_are_clean(run_source):
     assert not (terminator_ids & {e.get("rule_id") for e in result.errors}), (
         f"Balanced blocks must not raise terminator errors. Got: {result.messages!r}"
     )
+
+
+def test_multi_variable_next_is_clean(run_source):
+    # `Next j, i` closes both nested loops on one line — must NOT raise a
+    # spurious VBA110 (For without Next) or VBA119 (stray End Sub).
+    src = (
+        "Sub S()\n"
+        "    Dim i As Long, j As Long\n"
+        "    For i = 1 To 3\n"
+        "        For j = 1 To 3\n"
+        "            Debug.Print i, j\n"
+        "    Next j, i\n"
+        "End Sub\n"
+    )
+    result = run_source(src)
+    ids = {e.get("rule_id") for e in result.errors}
+    assert "VBA110" not in ids and "VBA119" not in ids, (
+        f"Multi-variable Next must parse cleanly. Got: {result.messages!r}"
+    )
+
+
+def test_triple_multi_variable_next_is_clean(run_source):
+    src = (
+        "Sub S()\n"
+        "    Dim i As Long, j As Long, k As Long\n"
+        "    For i = 1 To 2\n"
+        "        For j = 1 To 2\n"
+        "            For k = 1 To 2\n"
+        "                Debug.Print i, j, k\n"
+        "    Next k, j, i\n"
+        "End Sub\n"
+    )
+    result = run_source(src)
+    ids = {e.get("rule_id") for e in result.errors}
+    assert "VBA110" not in ids and "VBA119" not in ids

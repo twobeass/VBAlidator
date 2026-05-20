@@ -181,6 +181,10 @@ class VBAParser:
         self.pos = 0
         self.current_token = None
         self.errors = []  # collected syntax errors (dicts)
+        # `Next j, i` closes several nested For loops at once. The innermost
+        # parse_for consumes the whole list and records how many *enclosing*
+        # loops it also closed here, so those loops don't misfire VBA110.
+        self._pending_next_closes = 0
         self.advance()
 
     def _record_syntax_error(self, message, line=None, rule_id="VBA_SYN001"):
@@ -824,7 +828,11 @@ class VBAParser:
             
             elif self.match('IDENTIFIER', 'For'):
                 nodes.append(self.parse_for())
-            
+                # A nested `Next j, i` closed this loop too; stop the body here
+                # and let the enclosing parse_for account for the close.
+                if self._pending_next_closes > 0:
+                    return nodes
+
             elif self.match('IDENTIFIER', 'Do'):
                 nodes.append(self.parse_do())
                 
@@ -1064,15 +1072,28 @@ class VBAParser:
         next_var_token = None
         next_multi = False
         if not self.consume('IDENTIFIER', 'Next'):
-            self._record_syntax_error(
-                "Compile error: For without Next", line=line, rule_id="VBA110")
+            # An enclosing loop's `Next j, i` may already have closed this one.
+            if self._pending_next_closes > 0:
+                self._pending_next_closes -= 1
+            else:
+                self._record_syntax_error(
+                    "Compile error: For without Next", line=line, rule_id="VBA110")
         elif self.current_token.type == 'IDENTIFIER':
             # Optional variable name after Next (`Next i`).
             next_var_token = self.current_token
             self.advance()
-            if self.match('OPERATOR', ','):
-                # `Next j, i` closes several nested loops on one line.
+            # `Next j, i [, ...]` closes several nested loops on one line. Each
+            # extra name closes one enclosing loop; record that so those
+            # parse_for frames don't report a missing Next.
+            extra_closes = 0
+            while self.match('OPERATOR', ','):
                 next_multi = True
+                self.advance()  # consume ','
+                if self.current_token.type == 'IDENTIFIER':
+                    extra_closes += 1
+                    self.advance()
+            if extra_closes:
+                self._pending_next_closes += extra_closes
         self.consume_statement()
 
         return ForNode(

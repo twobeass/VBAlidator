@@ -254,7 +254,9 @@ class Preprocessor:
                 # Handle #Const
                 elif directive == '#const':
                     # #Const Identifier = Expression
-                    # We need to parse identifier
+                    # Only diagnose / assign in an active branch — a malformed
+                    # #Const inside a dead `#If False` branch is not compiled.
+                    active = self.stack[-1]["active"]
                     current_token = next(iterator, None)
                     if current_token and current_token.type == 'IDENTIFIER':
                          const_name = current_token.value
@@ -268,21 +270,23 @@ class Preprocessor:
                                    current_token = next(iterator, None)
 
                               # Evaluate and assign ONLY if active
-                              if self.stack[-1]["active"]:
+                              if active:
                                    val = self.evaluate(expr_tokens)
                                    self.defines[const_name.upper()] = val
                          else:
                               # VBA192 — #Const Identifier without `= expression`.
-                              self._record(
-                                  "Compile error: Invalid syntax for conditional compiler constant declaration",
-                                  getattr(directive_tok, 'line', None), "VBA192")
+                              if active:
+                                  self._record(
+                                      "Compile error: Invalid syntax for conditional compiler constant declaration",
+                                      getattr(directive_tok, 'line', None), "VBA192")
                               while current_token and current_token.type not in ('NEWLINE', 'EOF'):
                                    current_token = next(iterator, None)
                     else:
                          # VBA192 — #Const with no constant name.
-                         self._record(
-                             "Compile error: Invalid syntax for conditional compiler constant declaration",
-                             getattr(directive_tok, 'line', None), "VBA192")
+                         if active:
+                             self._record(
+                                 "Compile error: Invalid syntax for conditional compiler constant declaration",
+                                 getattr(directive_tok, 'line', None), "VBA192")
                          while current_token and current_token.type not in ('NEWLINE', 'EOF'):
                               current_token = next(iterator, None)
 
