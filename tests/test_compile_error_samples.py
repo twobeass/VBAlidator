@@ -31,6 +31,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "declared_type": ("not defined", "no members"),
     "assignment_semantics": ("assignment to", "me keyword", "new keyword"),
     "named_args": ("named argument",),
+    "object_module": ("object module",),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

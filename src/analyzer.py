@@ -171,6 +171,9 @@ class Analyzer:
             # Phase 1.6 — declared-type resolution (VBA120/122/123)
             self._validate_declared_types(mod)
 
+            # Phase 3.10 — object-module member restrictions (VBA370)
+            self._validate_object_module_members(mod)
+
             # Phase 3.3 — Declare PtrSafe (64-bit) requirement
             self._validate_ptrsafe_declares(mod)
 
@@ -645,6 +648,22 @@ class Analyzer:
                         ),
                     })
 
+                # VBA137 — user-defined types may not be passed ByVal (enums
+                # are Long under the hood and are exempt).
+                if getattr(arg, 'mechanism', 'ByRef') == 'ByVal':
+                    base_t = (arg.type_name or '').replace('()', '').strip().lower()
+                    udt = self.udts.get(base_t)
+                    if udt is not None and not getattr(udt, 'is_enum', False):
+                        self.errors.append({
+                            "file": mod.filename, "line": line,
+                            "rule_id": "VBA137", "severity": "error",
+                            "message": (
+                                f"User-defined type '{arg.type_name}' parameter "
+                                f"'{arg.name}' of {ptype} '{proc.name}' may not be "
+                                f"passed ByVal; use ByRef."
+                            ),
+                        })
+
             # VBA133 — a ParamArray cannot coexist with Optional parameters.
             if paramarray_count and any(getattr(a, 'is_optional', False) for a in args):
                 self.errors.append({
@@ -903,6 +922,10 @@ class Analyzer:
         "object", "variant", "any", "iunknown", "idispatch",
     }
 
+    # Type-declaration suffix → implied type. Only $ / % / @ survive lexing
+    # as part of the identifier token (& ! # are tokenised separately).
+    _TYPE_SUFFIX_MAP = {'$': 'string', '%': 'integer', '@': 'currency'}
+
     # Universal VBA / stdole / MSForms intrinsic type & enum names that are
     # not part of every host model but are always available in the VBA
     # runtime. Keeps VBA120 quiet on these regardless of which `--host`
@@ -980,6 +1003,44 @@ class Analyzer:
                 f"If it is a host type, load the matching model with `--host`."
             ),
         })
+
+    def _validate_object_module_members(self, mod):
+        """VBA370 — constants, arrays and Declare statements may not be Public
+        members of an object module (Class / Form). Such members are only
+        legal in standard modules."""
+        if mod.module_type not in ('Class', 'Form'):
+            return
+        public_scopes = ('public', 'global')
+        for var in mod.variables:
+            if getattr(var, 'is_enum_member', False):
+                continue
+            if (var.scope or '').lower() not in public_scopes:
+                continue
+            kind = None
+            if getattr(var, 'is_const', False):
+                kind = "constant"
+            elif (var.type_name or '').endswith('()'):
+                kind = "array"
+            if kind:
+                self.errors.append({
+                    "file": mod.filename, "line": 0,
+                    "rule_id": "VBA370", "severity": "error",
+                    "message": (
+                        f"Public {kind} '{var.name}' is not allowed as a member of "
+                        f"object module '{mod.name}'. Use a standard module, or make "
+                        f"it Private."
+                    ),
+                })
+        for proc in mod.procedures:
+            if getattr(proc, 'is_declare', False) and (proc.scope or '').lower() in public_scopes:
+                self.errors.append({
+                    "file": mod.filename, "line": getattr(proc, 'line', 0) or 0,
+                    "rule_id": "VBA370", "severity": "error",
+                    "message": (
+                        f"Public Declare '{proc.name}' is not allowed in object module "
+                        f"'{mod.name}'. Declare statements in a class must be Private."
+                    ),
+                })
 
     def _validate_declared_types(self, mod):
         """Phase 1.6 — VBA120/122/123: resolve declared type names and reject
@@ -1821,6 +1882,23 @@ class Analyzer:
 
                     # Phase 1.6 — VBA120: resolve the declared local type.
                     self._check_type_known(current_type, t.line, filename, context)
+
+                    # VBA270 — a type-declaration suffix on the name must agree
+                    # with the `As` type (`Dim x% As Long` is illegal). Only the
+                    # $ / % / @ suffixes survive lexing as part of the identifier.
+                    if current_name and current_name[-1] in self._TYPE_SUFFIX_MAP:
+                        sfx_type = self._TYPE_SUFFIX_MAP[current_name[-1]]
+                        base_ct = current_type.replace('()', '').split('*')[0].strip().lower()
+                        if base_ct and base_ct != sfx_type:
+                            self.errors.append({
+                                "file": filename, "line": t.line,
+                                "rule_id": "VBA270", "severity": "error",
+                                "message": (
+                                    f"Type-declaration character on '{current_name}' "
+                                    f"implies {sfx_type.capitalize()} but it is declared "
+                                    f"As {current_type} in '{context}'."
+                                ),
+                            })
 
                     # VBA165 — `New` requires a creatable class; `As New
                     # <primitive/Object/Variant>` is illegal.

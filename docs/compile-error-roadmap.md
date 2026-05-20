@@ -23,7 +23,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 86** (nach Welle 4 — alle Wellen abgeschlossen).
+Regeln gesamt: **41 → 90** (10 Wellen + Maximum-Coverage-Nachschub).
 
 ---
 
@@ -298,21 +298,38 @@ VBA141 ist rein syntaktisch.
 
 ---
 
+## Maximum-Coverage-Nachschub (nach dem Review)
+
+Erneute kritische Durchsicht der zurückgestellten Regeln und des
+Microsoft-Katalogs: alles, was sich FP-arm umsetzen lässt, wurde nachgezogen
+(jeweils vorab gegen den realen `awesome_vba`-Korpus auf 0 Treffer geprüft):
+
+| ID | Meldung | Schicht |
+|----|---------|---------|
+| VBA137 | User-defined type passed ByVal (`ByVal p As <UDT>`; Enums ausgenommen) | Analyzer |
+| VBA151 | Code/Statement nach `End Sub/Function/Property` (nur Kommentare erlaubt) | Parser |
+| VBA270 | Typkennzeichen ≠ `As`-Typ (`Dim x% As Long`; ersetzt das geplante VBA_LEX003) | Analyzer |
+| VBA370 | Public Const/Array/Declare als Member eines Objektmoduls (Class/Form) | Analyzer |
+
 ## Status: abgeschlossen 🎉
 
-Alle 10 Wellen umgesetzt. **41 → 86 Regeln.** Voll implementiert: Wellen
-1, 3, 4, 7, 8, 9, 10 (vollständig) sowie 2, 5, 6 (Kernregeln). Bewusst
-zurückgestellte Einzelregeln mit Begründung (FP-Risiko bzw. fehlendes
-Ausdruck-Typsystem):
+Alle 10 Wellen + Maximum-Coverage-Nachschub. **41 → 90 Regeln.**
 
-| Regel | Thema | Grund |
-|-------|-------|-------|
-| VBA121 | Forward reference to UDT | Sonderfall-Semantik, geringer Nutzen |
-| VBA135 | Invalid optional parameter type | kontextabhängig |
-| VBA151 | Only comments after End Sub | überlappt VBA361 |
-| VBA154 | Procedure type mismatch (AddressOf) | Signatur-Typsystem nötig |
-| VBA161/162/163/166 | Array-/Dimensions-/AddressOf-Zuweisung | Ausdruck-Typsystem nötig |
+Verbleibende, bewusst **nicht** umgesetzte Regeln — jede würde ein vollständiges
+Ausdruck-/Array-Typsystem erfordern oder ist nicht eindeutig statisch
+entscheidbar (Umsetzung würde Falsch-Positive riskieren, was dem Zweck eines
+Compile-Safety-Tools widerspricht):
+
+| Regel | Thema | Grund der Nichtumsetzung |
+|-------|-------|--------------------------|
+| VBA121 | Forward reference to UDT | Sonderfall-Semantik, in der Praxis selten relevant |
+| VBA135 | Invalid optional parameter type | kein eindeutiger Compile-Fehler |
+| VBA154 | Procedure type mismatch (AddressOf) | Signatur-Typsystem für AddressOf-Ziele nötig |
+| VBA161 | Can't assign to an array | Array-Kopie (`a = b`) ist gültiges VBA → FP-Risiko |
+| VBA162 | Function call on LHS must return … | Rückgabetyp-Inferenz auf der linken Seite nötig |
+| VBA163 | Too many / wrong number of dimensions | Array-Shape-Tracking nötig; >60 Dims praktisch irrelevant |
+| VBA166 | Invalid use of AddressOf | Ziel kann in anderem Modul liegen → FP-Risiko |
 | VBA185 | Must be first statement on the line | format-/kontextabhängig |
-| VBA_LEX003 | Type-declaration character mismatch | Parser-Kontext, falsche Schicht |
 
-Der `awesome_vba`-Falsch-Positiv-Wächter ist über alle Wellen grün geblieben.
+Der `awesome_vba`-Falsch-Positiv-Wächter ist über **alle** Wellen und den
+Nachschub grün geblieben (395 Tests).

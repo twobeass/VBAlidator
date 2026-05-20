@@ -26,6 +26,30 @@ def test_param_list_violation(rule_id, src, run_source):
     )
 
 
+def test_udt_byval_param(run_source):
+    r = run_source(
+        "Type T\n    x As Long\nEnd Type\n"
+        "Sub S(ByVal p As T)\nEnd Sub\n"
+    )
+    assert "VBA137" in _ids(r)
+
+
+def test_udt_byref_param_ok(run_source):
+    r = run_source(
+        "Type T\n    x As Long\nEnd Type\n"
+        "Sub S(ByRef p As T)\nEnd Sub\n"
+    )
+    assert "VBA137" not in _ids(r)
+
+
+def test_enum_byval_param_ok(run_source):
+    r = run_source(
+        "Enum E\n    A = 1\nEnd Enum\n"
+        "Sub S(ByVal p As E)\nEnd Sub\n"
+    )
+    assert "VBA137" not in _ids(r)
+
+
 def test_well_formed_param_lists_are_clean(run_source):
     src = (
         "Sub A(a As Long, Optional b As Long, Optional c As String)\nEnd Sub\n"

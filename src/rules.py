@@ -579,6 +579,17 @@ _RULES: list[Rule] = [
         fix_hint="Declare the ParamArray as `ParamArray name() As Variant`.",
     ),
     Rule(
+        rule_id="VBA137",
+        title="User-defined type passed ByVal",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="A user-defined `Type` parameter must be passed `ByRef`, not `ByVal`.",
+        fail_example="Type T\n    x As Long\nEnd Type\nSub S(ByVal p As T)\nEnd Sub",
+        ok_example="Type T\n    x As Long\nEnd Type\nSub S(ByRef p As T)\nEnd Sub",
+        fix_hint="Change the parameter to `ByRef` (the default).",
+    ),
+    Rule(
         rule_id="VBA136",
         title="Array parameter passed ByVal",
         severity="error",
@@ -588,6 +599,40 @@ _RULES: list[Rule] = [
         fail_example="Sub S(ByVal a() As Long): End Sub",
         ok_example="Sub S(ByRef a() As Long): End Sub",
         fix_hint="Change the parameter mechanism to `ByRef` (the default).",
+    ),
+
+    # -- Phase 2.14: type-declaration character --------------------
+    Rule(
+        rule_id="VBA270",
+        title="Type-declaration character does not match declared type",
+        severity="error",
+        category="declaration",
+        phase="2.14",
+        description=(
+            "A legacy type-declaration suffix (`$` String, `%` Integer, `@` "
+            "Currency) on a variable name must agree with its explicit `As` "
+            "type."
+        ),
+        fail_example="Dim count% As Long",
+        ok_example="Dim count As Long   ' or: Dim count%",
+        fix_hint="Drop the suffix, or make the `As` type match it.",
+    ),
+
+    # -- Phase 3.10: object-module member restrictions -------------
+    Rule(
+        rule_id="VBA370",
+        title="Constant/array/Declare as Public member of object module",
+        severity="error",
+        category="placement",
+        phase="3.10",
+        description=(
+            "Constants, arrays and `Declare` statements cannot be Public "
+            "members of an object module (Class / Form). They are only legal "
+            "in standard modules, or as Private members."
+        ),
+        fail_example="' in a .cls:\nPublic Const MAX As Long = 10",
+        ok_example="' in a .cls:\nPrivate Const MAX As Long = 10",
+        fix_hint="Move it to a standard module, or mark it Private and expose it via a Property Get.",
     ),
 
     # -- Phase 2.1: jumps -------------------------------------------
@@ -639,6 +684,20 @@ _RULES: list[Rule] = [
     ),
 
     # -- Phase 2.12: procedure / property consistency ---------------
+    Rule(
+        rule_id="VBA151",
+        title="Code after End Sub/Function/Property",
+        severity="error",
+        category="syntax",
+        phase="2.12",
+        description=(
+            "Only comments may appear after `End Sub`, `End Function`, or "
+            "`End Property` on the same line."
+        ),
+        fail_example="Sub S()\nEnd Sub: x = 1",
+        ok_example="Sub S()\nEnd Sub   ' done",
+        fix_hint="Move the trailing statement to its own line.",
+    ),
     Rule(
         rule_id="VBA150",
         title="Ambiguous name detected (duplicate procedure)",

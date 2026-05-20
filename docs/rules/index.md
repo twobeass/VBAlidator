@@ -39,10 +39,12 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA133`](VBA133.md) | 🔴 error | `signature` | 2.10 | ParamArray combined with Optional |
 | [`VBA134`](VBA134.md) | 🔴 error | `signature` | 2.10 | ParamArray element type is not Variant |
 | [`VBA136`](VBA136.md) | 🔴 error | `signature` | 2.10 | Array parameter passed ByVal |
+| [`VBA137`](VBA137.md) | 🔴 error | `signature` | 2.10 | User-defined type passed ByVal |
 | [`VBA140`](VBA140.md) | 🔴 error | `signature` | 2.9 | Named argument not found |
 | [`VBA141`](VBA141.md) | 🔴 error | `signature` | 2.9 | Named argument specified more than once |
 | [`VBA142`](VBA142.md) | 🔴 error | `signature` | 2.9 | Named arguments with ParamArray |
 | [`VBA150`](VBA150.md) | 🔴 error | `declaration` | 2.12 | Ambiguous name detected (duplicate procedure) |
+| [`VBA151`](VBA151.md) | 🔴 error | `syntax` | 2.12 | Code after End Sub/Function/Property |
 | [`VBA152`](VBA152.md) | 🔴 error | `property` | 2.12 | Property Get/Let type inconsistent |
 | [`VBA153`](VBA153.md) | 🔴 error | `interface` | 2.12 | Implements method signature mismatch |
 | [`VBA160`](VBA160.md) | 🔴 error | `assignment` | 2.13 | Assignment to constant not permitted |
@@ -73,6 +75,7 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA231`](VBA231.md) | 🔴 error | `const_expression` | 2.5 | `Const` initialiser references a non-constant |
 | [`VBA240`](VBA240.md) | 🔴 error | `operator_type` | 2.4 | Arithmetic operator between string and numeric literal |
 | [`VBA250`](VBA250.md) | 🔴 error | `declaration` | 2.8 | Fixed-length String at procedure level |
+| [`VBA270`](VBA270.md) | 🔴 error | `declaration` | 2.14 | Type-declaration character does not match declared type |
 | [`VBA300`](VBA300.md) | 🔴 error | `platform` | 3.3 | `Declare` missing `PtrSafe` |
 | [`VBA310`](VBA310.md) | 🔴 error | `enum` | 3.4 | Duplicate Enum member name |
 | [`VBA320`](VBA320.md) | 🟡 warning | `style` | 3.6 | Module is missing `Option Explicit` |
@@ -82,6 +85,7 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA350`](VBA350.md) | 🔴 error | `syntax` | 3.5 | Procedure terminator does not match its kind |
 | [`VBA360`](VBA360.md) | 🔴 error | `placement` | 3.5 | Module-only declaration inside a procedure body |
 | [`VBA361`](VBA361.md) | 🔴 error | `placement` | 3.5 | Executable statement at module level |
+| [`VBA370`](VBA370.md) | 🔴 error | `placement` | 3.10 | Constant/array/Declare as Public member of object module |
 | [`VBA_LEX001`](VBA_LEX001.md) | 🔴 error | `lexer` | 0 | Unexpected character |
 | [`VBA_LEX002`](VBA_LEX002.md) | 🔴 error | `lexer` | 2.7 | Invalid date literal |
 | [`VBA_LEX004`](VBA_LEX004.md) | 🔴 error | `lexer` | 3.9 | Unterminated string or missing end bracket |
@@ -91,4 +95,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*86 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*90 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

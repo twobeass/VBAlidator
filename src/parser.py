@@ -721,12 +721,14 @@ class VBAParser:
         # occasionally close a Function with `End Sub` (or vice versa);
         # VBE rejects this at compile time. Surface it as VBA350 so the
         # mismatch is caught before VBE ever sees it.
+        consumed_end = False
         if self.match('IDENTIFIER', 'End'):
              end_line = self.current_token.line
              self.advance()
              actual = self.current_token.value.lower() if self.current_token.type == 'IDENTIFIER' else None
              if actual == end_marker:
                  self.advance()
+                 consumed_end = True
              elif actual in ('sub', 'function', 'property'):
                  # Wrong terminator keyword (`End Sub` closing a Function
                  # etc.). Consume it so recovery continues cleanly.
@@ -743,6 +745,20 @@ class VBAParser:
                      ),
                  })
                  self.advance()
+
+        # VBA151 — only comments may follow `End Sub/Function/Property`.
+        if consumed_end:
+            while self.current_token.type not in ('NEWLINE', 'EOF'):
+                if self.current_token.type == 'COMMENT':
+                    break
+                if self.current_token.type == 'OPERATOR' and self.current_token.value == ':':
+                    self.advance()
+                    continue
+                self._record_syntax_error(
+                    "Compile error: Only comments may appear after End Sub, "
+                    "End Function, or End Property",
+                    line=self.current_token.line, rule_id="VBA151")
+                break
         self.consume_statement()
 
         module.procedures.append(proc)
