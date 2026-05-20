@@ -17,13 +17,13 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ✅ fertig |
 | 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
 | 5  | Prozedur-/Property-Konsistenz | VBA150,152,153 (151/154 zurückgestellt) | ✅ fertig |
-| 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
+| 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160,164,165 (161/162/163/166 zurückgestellt) | ✅ fertig |
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
 | 8  | Statement-Platzierung / Def / Option | VBA180–VBA184 (VBA185 zurückgestellt) | ✅ fertig |
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 80** (nach Welle 2).
+Regeln gesamt: **41 → 83** (nach Welle 6).
 
 ---
 
@@ -243,6 +243,32 @@ Semantik, geringer Nutzen, FP-Risiko.
 
 **Tests:** `tests/test_phase16_declared_types.py` (9 Fälle), Fixtures in
 `tests/samples/compile_errors/declared_type/`. FP-Wächter grün.
+
+---
+
+## Welle 6 — Zuweisungs-/Ausdrucks-Semantik ✅
+
+Abgeschlossen.
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA160 | Assignment to constant not permitted | Zuweisung an `Const`/Enum-Member |
+| VBA164 | Invalid use of Me keyword | Zuweisung an `Me` |
+| VBA165 | Invalid use of New keyword | `As New <primitive/Object/Variant>` |
+
+**Umsetzung:** VBA160/164 in `_validate_set_vs_let` integriert; VBA165 in
+`process_dim` (Flag `saw_new`). Nebenbei einen Parser-Quirk behoben: ein
+modulweites bloßes `Const X = …` (ohne `Public`/`Private`) wurde mit
+`is_const=False` registriert — jetzt korrekt als `Const` (Default-Scope
+Private), wodurch auch VBA231/VBA160 dafür greifen.
+
+**Zurückgestellt:** VBA161 (Can't assign to an array), VBA162 (Function call
+on LHS), VBA163 (Wrong/Too many dimensions), VBA166 (Invalid use of AddressOf)
+— erfordern ein Ausdruck-Typsystem, das der Analyzer nicht vollständig besitzt;
+hohes FP-Risiko.
+
+**Tests:** `tests/test_phase213_assignment_semantics.py` (6 Fälle), Fixtures in
+`tests/samples/compile_errors/assignment_semantics/`. FP-Wächter grün.
 
 ---
 

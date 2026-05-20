@@ -1115,6 +1115,16 @@ class Analyzer:
         # skip those to avoid false positives.
         if not lhs or lhs[0].type != 'IDENTIFIER':
             return
+
+        # VBA164 — `Me` is read-only; it can never be an assignment target.
+        if lhs[0].value.lower() == 'me' and (len(lhs) == 1):
+            self.errors.append({
+                "file": filename, "line": lhs[0].line,
+                "rule_id": "VBA164", "severity": "error",
+                "message": f"Invalid use of Me keyword: cannot assign to Me in '{context}'.",
+            })
+            return
+
         is_bare = len(lhs) == 1
         is_dotted_chain = (
             not is_bare
@@ -1133,7 +1143,21 @@ class Analyzer:
         kind_l = (kind or "").lower()
         if kind_l in self._CALLABLE_KINDS:
             return
-        if kind_l in ("enumitem", "type", "class", "property"):
+
+        # VBA160 — assigning to a constant or an Enum member is illegal.
+        if kind_l in ("const", "enumitem"):
+            what = "constant" if kind_l == "const" else "Enum member"
+            self.errors.append({
+                "file": filename, "line": lhs[0].line,
+                "rule_id": "VBA160", "severity": "error",
+                "message": (
+                    f"Assignment to {what} '{''.join(t.value for t in lhs)}' is not "
+                    f"permitted in '{context}'."
+                ),
+            })
+            return
+
+        if kind_l in ("type", "class", "property"):
             return
 
         line = lhs[0].line
@@ -1772,10 +1796,12 @@ class Analyzer:
             if t.type == 'IDENTIFIER':
                 if t.value.lower() == 'as':
                     explicit_as = True
+                    saw_new = False
                     i += 1
                     type_parts = []
                     while i < len(tokens_list):
                         if tokens_list[i].value.lower() == 'new':
+                            saw_new = True
                             i += 1
                             continue
                         
@@ -1795,6 +1821,20 @@ class Analyzer:
 
                     # Phase 1.6 — VBA120: resolve the declared local type.
                     self._check_type_known(current_type, t.line, filename, context)
+
+                    # VBA165 — `New` requires a creatable class; `As New
+                    # <primitive/Object/Variant>` is illegal.
+                    if saw_new:
+                        base = current_type.replace('()', '').split('*')[0].strip()
+                        if base.lower() in self._BUILTIN_TYPE_NAMES:
+                            self.errors.append({
+                                "file": filename, "line": t.line,
+                                "rule_id": "VBA165", "severity": "error",
+                                "message": (
+                                    f"Invalid use of New keyword: '{base}' is not a "
+                                    f"creatable class in '{context}'."
+                                ),
+                            })
 
                     # Phase 2.8 — Fixed-length String only valid at module
                     # level (or inside UDTs). `Dim s As String * 10` inside

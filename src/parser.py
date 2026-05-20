@@ -612,7 +612,13 @@ class VBAParser:
 
         # Check if Const
         is_const = False
-        if scope.lower() in ('public', 'private', 'global', 'friend'):
+        if scope.lower() == 'const':
+            # Bare module-level `Const X = …` (no Public/Private prefix). The
+            # `Const` keyword was consumed as `scope`; default the real scope
+            # to Private (VBA's default for an unqualified module constant).
+            is_const = True
+            scope = 'Private'
+        elif scope.lower() in ('public', 'private', 'global', 'friend'):
              if self.match('IDENTIFIER', 'Const'):
                  is_const = True
                  self.advance()

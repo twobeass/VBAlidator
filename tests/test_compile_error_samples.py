@@ -29,6 +29,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "lexer_limits": ("unterminated", "missing end bracket", "exceeding", "characters long"),
     "proc_consistency": ("ambiguous name", "inconsistent", "does not match the interface"),
     "declared_type": ("not defined", "no members"),
+    "assignment_semantics": ("assignment to", "me keyword", "new keyword"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

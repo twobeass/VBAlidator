@@ -42,6 +42,9 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA150`](VBA150.md) | 🔴 error | `declaration` | 2.12 | Ambiguous name detected (duplicate procedure) |
 | [`VBA152`](VBA152.md) | 🔴 error | `property` | 2.12 | Property Get/Let type inconsistent |
 | [`VBA153`](VBA153.md) | 🔴 error | `interface` | 2.12 | Implements method signature mismatch |
+| [`VBA160`](VBA160.md) | 🔴 error | `assignment` | 2.13 | Assignment to constant not permitted |
+| [`VBA164`](VBA164.md) | 🔴 error | `assignment` | 2.13 | Invalid use of Me keyword |
+| [`VBA165`](VBA165.md) | 🔴 error | `declaration` | 2.13 | Invalid use of New keyword |
 | [`VBA170`](VBA170.md) | 🔴 error | `control_flow` | 2.11 | Exit For not within For...Next |
 | [`VBA171`](VBA171.md) | 🔴 error | `control_flow` | 2.11 | Exit Do not within Do...Loop |
 | [`VBA172`](VBA172.md) | 🔴 error | `control_flow` | 2.11 | Next control variable mismatch |
@@ -85,4 +88,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*80 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*83 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

@@ -661,6 +661,41 @@ _RULES: list[Rule] = [
         fix_hint="Match the interface member's parameter list exactly.",
     ),
 
+    # -- Phase 2.13: assignment / expression semantics --------------
+    Rule(
+        rule_id="VBA160",
+        title="Assignment to constant not permitted",
+        severity="error",
+        category="assignment",
+        phase="2.13",
+        description="A `Const` or `Enum` member is read-only and cannot be assigned to.",
+        fail_example="Const PI As Double = 3.14159\nPI = 3",
+        ok_example="Const PI As Double = 3.14159\nDim r As Double\nr = PI",
+        fix_hint="Assign to a variable, not a constant or Enum member.",
+    ),
+    Rule(
+        rule_id="VBA164",
+        title="Invalid use of Me keyword",
+        severity="error",
+        category="assignment",
+        phase="2.13",
+        description="`Me` refers to the current instance and cannot be assigned to.",
+        fail_example="Set Me = Nothing",
+        ok_example="Set obj = Me",
+        fix_hint="Use a regular object variable as the assignment target.",
+    ),
+    Rule(
+        rule_id="VBA165",
+        title="Invalid use of New keyword",
+        severity="error",
+        category="declaration",
+        phase="2.13",
+        description="`New` requires a creatable class; primitives, `Object` and `Variant` cannot be `New`-ed.",
+        fail_example="Dim x As New Long",
+        ok_example="Dim c As New Collection",
+        fix_hint="Use `New` only with a class type, or drop `New` for primitives.",
+    ),
+
     # -- Phase 2.11: loop / label context ---------------------------
     Rule(
         rule_id="VBA170",
