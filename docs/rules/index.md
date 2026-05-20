@@ -72,8 +72,11 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA361`](VBA361.md) | 🔴 error | `placement` | 3.5 | Executable statement at module level |
 | [`VBA_LEX001`](VBA_LEX001.md) | 🔴 error | `lexer` | 0 | Unexpected character |
 | [`VBA_LEX002`](VBA_LEX002.md) | 🔴 error | `lexer` | 2.7 | Invalid date literal |
+| [`VBA_LEX004`](VBA_LEX004.md) | 🔴 error | `lexer` | 3.9 | Unterminated string or missing end bracket |
+| [`VBA_LEX005`](VBA_LEX005.md) | 🔴 error | `lexer` | 3.9 | Identifier too long |
+| [`VBA_LEX006`](VBA_LEX006.md) | 🔴 error | `lexer` | 3.9 | Line too long |
 | [`VBA_RT000`](VBA_RT000.md) | 🔵 info | `roundtrip` | 4.5 | Round-trip verification unavailable |
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*71 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*74 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

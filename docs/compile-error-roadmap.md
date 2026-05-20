@@ -21,9 +21,9 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
 | 8  | Statement-Platzierung / Def / Option | VBA180–VBA184 (VBA185 zurückgestellt) | ✅ fertig |
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
-| 10 | Lexer-Ergänzungen | VBA_LEX003–006 | ⬜ geplant |
+| 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 71** (nach Welle 9).
+Regeln gesamt: **41 → 74** (nach Welle 10).
 
 ---
 
@@ -168,6 +168,25 @@ Abgeschlossen (preprocessor-seitig). `Preprocessor` sammelt jetzt Fehler
 
 **Tests:** `tests/test_phase38_conditional_compilation.py` (6 Fälle inkl.
 Gegenbeispiele), Fixtures in `tests/samples/compile_errors/conditional_compilation/`.
+
+---
+
+## Welle 10 — Lexer-Ergänzungen ✅
+
+Abgeschlossen (lexer-seitig).
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA_LEX004 | Unterminated string / missing end bracket | `"…` ohne `"`, `[…` ohne `]` |
+| VBA_LEX005 | Identifier too long | Bezeichner > 255 Zeichen |
+| VBA_LEX006 | Line too long | physische Zeile > 1023 Zeichen |
+
+**VBA_LEX003 (Type-declaration character mismatch) zurückgestellt:** braucht
+Parser-/Deklarationskontext (`Dim x% As String`), gehört nicht auf Lexer-Ebene
+— bewusst nicht implementiert (FP-Risiko, falsche Schicht).
+
+**Tests:** `tests/test_phase39_lexer_limits.py` (7 Fälle inkl. Gegenbeispiele),
+Fixtures in `tests/samples/compile_errors/lexer_limits/`.
 
 ---
 

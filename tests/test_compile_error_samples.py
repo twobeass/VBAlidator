@@ -26,6 +26,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "loop_label": ("exit for", "exit do", "next control", "already in use", "for each", "duplicate label"),
     "placement_def_option": ("invalid inside", "deftype", "duplicate option", "duplicate definition"),
     "conditional_compilation": ("#if", "#else", "#end if", "#const"),
+    "lexer_limits": ("unterminated", "missing end bracket", "exceeding", "characters long"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

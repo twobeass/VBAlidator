@@ -228,7 +228,26 @@ class Lexer:
         # Compile regex
         self.master_pat = re.compile('|'.join('(?P<%s>%s)' % pair for pair in self.token_specs), re.IGNORECASE)
 
+    # VBA hard limits: a physical source line may be at most 1023 characters,
+    # and an identifier (variable / procedure / type name) at most 255.
+    _MAX_LINE_LEN = 1023
+    _MAX_IDENT_LEN = 255
+
+    def _scan_line_lengths(self):
+        """VBA_LEX006 — flag physical lines longer than VBA's 1023-char limit."""
+        for idx, raw in enumerate(self.code.split('\n'), start=1):
+            line = raw.rstrip('\r')
+            if len(line) > self._MAX_LINE_LEN:
+                err = LexerError('', idx, 1)
+                err.rule_id = "VBA_LEX006"
+                err.message = (
+                    f"Line {idx} is {len(line)} characters long, exceeding VBA's "
+                    f"{self._MAX_LINE_LEN}-character line limit."
+                )
+                self.errors.append(err)
+
     def tokenize(self):
+        self._scan_line_lengths()
         for mo in self.master_pat.finditer(self.code):
             kind = mo.lastgroup
             value = mo.group()
@@ -248,7 +267,28 @@ class Lexer:
             elif kind == 'MISMATCH':
                 # Don't drop silently: capture so callers can surface the error
                 # instead of silently producing a garbage token stream.
-                self.errors.append(LexerError(value, self.line, self.column))
+                if value == '"':
+                    # An opening quote that never matched STRING means the
+                    # closing quote is missing (VBA_LEX004).
+                    err = LexerError(value, self.line, self.column)
+                    err.rule_id = "VBA_LEX004"
+                    err.message = (
+                        f"Unterminated string literal at line {self.line}, "
+                        f"column {self.column}: missing closing quote."
+                    )
+                    self.errors.append(err)
+                elif value == '[':
+                    # An opening bracket that never matched BRACKET_IDENTIFIER
+                    # means the closing `]` is missing (VBA_LEX004).
+                    err = LexerError(value, self.line, self.column)
+                    err.rule_id = "VBA_LEX004"
+                    err.message = (
+                        f"Missing end bracket at line {self.line}, column "
+                        f"{self.column}: '[' without a matching ']'."
+                    )
+                    self.errors.append(err)
+                else:
+                    self.errors.append(LexerError(value, self.line, self.column))
                 self.column += len(value)
                 continue
             elif kind == 'DATELITERAL':
@@ -262,6 +302,17 @@ class Lexer:
                         f"format."
                     )
                     err.rule_id = "VBA_LEX002"
+                    self.errors.append(err)
+            elif kind == 'IDENTIFIER':
+                # VBA_LEX005 — identifiers are limited to 255 characters.
+                bare = value.rstrip('$%@')
+                if len(bare) > self._MAX_IDENT_LEN:
+                    err = LexerError(value, self.line, self.column)
+                    err.rule_id = "VBA_LEX005"
+                    err.message = (
+                        f"Identifier at line {self.line} is {len(bare)} characters "
+                        f"long, exceeding VBA's {self._MAX_IDENT_LEN}-character limit."
+                    )
                     self.errors.append(err)
 
             yield Token(kind, value, self.line, self.column)

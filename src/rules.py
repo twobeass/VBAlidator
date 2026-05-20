@@ -75,6 +75,42 @@ _RULES: list[Rule] = [
         ok_example="d = #2025-01-15#",
         fix_hint="Use m/d/y, yyyy-mm-dd, d-mmm-y, or 'MMMM d, y' format with valid date components.",
     ),
+    Rule(
+        rule_id="VBA_LEX004",
+        title="Unterminated string or missing end bracket",
+        severity="error",
+        category="lexer",
+        phase="3.9",
+        description=(
+            "A string literal has no closing `\"`, or a bracket-quoted name "
+            "`[…]` has no closing `]`."
+        ),
+        fail_example='s = "hello',
+        ok_example='s = "hello"',
+        fix_hint="Add the missing closing quote or `]`.",
+    ),
+    Rule(
+        rule_id="VBA_LEX005",
+        title="Identifier too long",
+        severity="error",
+        category="lexer",
+        phase="3.9",
+        description="VBA identifiers (names) are limited to 255 characters.",
+        fail_example="Dim aaaa…(>255 chars) As Long",
+        ok_example="Dim total As Long",
+        fix_hint="Shorten the identifier to 255 characters or fewer.",
+    ),
+    Rule(
+        rule_id="VBA_LEX006",
+        title="Line too long",
+        severity="error",
+        category="lexer",
+        phase="3.9",
+        description="A physical source line exceeds VBA's 1023-character limit.",
+        fail_example="' a single line longer than 1023 characters …",
+        ok_example="' wrap with the line-continuation character `_`",
+        fix_hint="Break the line using the `_` line-continuation character.",
+    ),
 
     # -- Round-trip verification (Phase 4.5) -------------------------
     Rule(
