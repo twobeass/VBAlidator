@@ -13,7 +13,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | Welle | Thema | Regel-IDs | Status |
 |-------|-------|-----------|--------|
 | 1  | Block-Terminator-Paarung | VBA110–VBA119 | ✅ fertig |
-| 2  | Deklarations-Typauflösung | VBA120–VBA123 | ⬜ geplant |
+| 2  | Deklarations-Typauflösung | VBA120,122,123 (VBA121 zurückgestellt) | ✅ fertig |
 | 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ✅ fertig |
 | 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
 | 5  | Prozedur-/Property-Konsistenz | VBA150,152,153 (151/154 zurückgestellt) | ✅ fertig |
@@ -23,7 +23,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 77** (nach Welle 5).
+Regeln gesamt: **41 → 80** (nach Welle 2).
 
 ---
 
@@ -212,6 +212,37 @@ Komplexität/FP.
 
 **Tests:** `tests/test_phase212_proc_consistency.py` (7 Fälle inkl.
 Mehrmodul-Implements), Fixtures in `tests/samples/compile_errors/proc_consistency/`.
+
+---
+
+## Welle 2 — Deklarations-Typauflösung ✅
+
+Abgeschlossen. Neuer Validator `_validate_declared_types(mod)` + Resolver
+`_is_known_type` / `_check_type_known`; lokale `Dim`-Typen zusätzlich in
+`process_dim` geprüft.
+
+| ID | Meldung | Severity | Auslöser |
+|----|---------|----------|----------|
+| VBA120 | User-defined type not defined | **warning** | unauflösbarer Typname |
+| VBA122 | User-defined type without members | error | leeres `Type … End Type` |
+| VBA123 | Empty Enum not allowed | error | leeres `Enum … End Enum` |
+
+**Severity-Entscheidung (wichtig):** VBA120 ist **warning**, nicht error. Mit
+einem prinzipiell unvollständigen Host-Modell lässt sich ein Tippfehler nicht
+sicher von einem nicht-modellierten Host-Typ unterscheiden. VBA120 macht das
+Risiko sichtbar, ohne die Compile-Safety zu blockieren — und der FP-Wächter
+(zählt nur `error`) bleibt grün. VBA122/123 sind modellunabhängig und bleiben
+harte Fehler.
+
+**FP-Reduktion:** kuratierte Allowlist universeller VBA/stdole/MSForms-
+Intrinsics (`OLE_COLOR`, `vbTriState`, `Form`, `Font`, `Picture`, …) +
+großzügige Behandlung bibliotheksqualifizierter Namen (`Scripting.Dictionary`).
+
+**VBA121 (Forward reference to UDT) zurückgestellt:** subtile Sonderfall-
+Semantik, geringer Nutzen, FP-Risiko.
+
+**Tests:** `tests/test_phase16_declared_types.py` (9 Fälle), Fixtures in
+`tests/samples/compile_errors/declared_type/`. FP-Wächter grün.
 
 ---
 

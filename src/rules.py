@@ -355,6 +355,46 @@ _RULES: list[Rule] = [
         fix_hint="Use `s = vbNullString` for a String, or declare an array.",
     ),
 
+    # -- Phase 1.6: declared-type resolution ------------------------
+    Rule(
+        rule_id="VBA120",
+        title="User-defined type not defined",
+        severity="warning",
+        category="type",
+        phase="1.6",
+        description=(
+            "A declared type name does not resolve to any built-in type, "
+            "source-declared `Type`/`Enum`/class, or host-model class. "
+            "Library-qualified names (`Scripting.Dictionary`) are accepted "
+            "leniently so un-modelled hosts don't false-positive."
+        ),
+        fail_example="Dim x As Custmer   ' typo for Customer",
+        ok_example="Dim x As Customer",
+        fix_hint="Define the `Type`/`Enum`/class, fix the spelling, or load the matching host model with `--host`.",
+    ),
+    Rule(
+        rule_id="VBA122",
+        title="User-defined type without members",
+        severity="error",
+        category="type",
+        phase="1.6",
+        description="A `Type … End Type` block must declare at least one member.",
+        fail_example="Type Empty\nEnd Type",
+        ok_example="Type Point\n    x As Long\nEnd Type",
+        fix_hint="Add at least one field, or remove the empty Type.",
+    ),
+    Rule(
+        rule_id="VBA123",
+        title="Empty Enum not allowed",
+        severity="error",
+        category="type",
+        phase="1.6",
+        description="An `Enum … End Enum` block must declare at least one member.",
+        fail_example="Enum Empty\nEnd Enum",
+        ok_example="Enum Color\n    Red\nEnd Enum",
+        fix_hint="Add at least one member, or remove the empty Enum.",
+    ),
+
     # -- Phase 1.5: block-terminator pairing ------------------------
     Rule(
         rule_id="VBA110",

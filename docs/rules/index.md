@@ -30,6 +30,9 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA117`](VBA117.md) | 🔴 error | `syntax` | 1.5 | Loop without Do |
 | [`VBA118`](VBA118.md) | 🔴 error | `syntax` | 1.5 | Wend without While |
 | [`VBA119`](VBA119.md) | 🔴 error | `syntax` | 1.5 | Block terminator without matching opener |
+| [`VBA120`](VBA120.md) | 🟡 warning | `type` | 1.6 | User-defined type not defined |
+| [`VBA122`](VBA122.md) | 🔴 error | `type` | 1.6 | User-defined type without members |
+| [`VBA123`](VBA123.md) | 🔴 error | `type` | 1.6 | Empty Enum not allowed |
 | [`VBA130`](VBA130.md) | 🔴 error | `signature` | 2.10 | Required parameter after Optional |
 | [`VBA131`](VBA131.md) | 🔴 error | `signature` | 2.10 | ParamArray is not the last parameter |
 | [`VBA132`](VBA132.md) | 🔴 error | `signature` | 2.10 | More than one ParamArray |
@@ -82,4 +85,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*77 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*80 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

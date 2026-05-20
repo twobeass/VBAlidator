@@ -168,6 +168,9 @@ class Analyzer:
             # Phase 2.12 — duplicate procedure names (VBA150)
             self._validate_duplicate_procedures(mod)
 
+            # Phase 1.6 — declared-type resolution (VBA120/122/123)
+            self._validate_declared_types(mod)
+
             # Phase 3.3 — Declare PtrSafe (64-bit) requirement
             self._validate_ptrsafe_declares(mod)
 
@@ -893,6 +896,125 @@ class Analyzer:
         if self.config.object_model.get("classes", {}).get(t):
             return True
         return False
+
+    _BUILTIN_TYPE_NAMES = {
+        "boolean", "byte", "integer", "long", "longlong", "longptr",
+        "single", "double", "currency", "decimal", "date", "string",
+        "object", "variant", "any", "iunknown", "idispatch",
+    }
+
+    # Universal VBA / stdole / MSForms intrinsic type & enum names that are
+    # not part of every host model but are always available in the VBA
+    # runtime. Keeps VBA120 quiet on these regardless of which `--host`
+    # model (if any) is loaded.
+    _INTRINSIC_TYPE_NAMES = {
+        # VBA.* intrinsic enums
+        "vbtristate", "vbcomparemethod", "vbcalltype", "vbdayofweek",
+        "vbfirstweekofyear", "vbvartype", "vbmsgboxresult", "vbmsgboxstyle",
+        "vbfileattribute", "vbappwinstyle", "vbstrconv", "vbqueryclose",
+        "vbimestatus",
+        # stdole picture / font / colour types
+        "ole_color", "ole_handle", "ole_tristate", "ole_optexclusive",
+        "ole_cancelbool", "ole_enabledefaultbool",
+        "ole_xpos_pixels", "ole_ypos_pixels", "ole_xsize_pixels", "ole_ysize_pixels",
+        "ole_xpos_himetric", "ole_ypos_himetric", "ole_xsize_himetric", "ole_ysize_himetric",
+        "ole_xpos_container", "ole_ypos_container", "ole_xsize_container", "ole_ysize_container",
+        "font", "ifont", "ifontdisp", "stdfont",
+        "picture", "ipicture", "ipicturedisp", "stdpicture",
+        # MSForms / VB form base types
+        "form", "userform", "control", "frame", "page", "msforms",
+    }
+
+    def _is_known_type(self, type_name):
+        """True if `type_name` resolves to a built-in, a source-declared
+        UDT/Enum, a class/form module, a host-model class/enum, or a
+        library-qualified name. Used by VBA120; deliberately lenient on
+        dotted/qualified names to avoid false positives on un-modelled hosts.
+        """
+        if not type_name:
+            return True
+        t = type_name.strip()
+        if t.endswith('()'):
+            t = t[:-2].strip()
+        if '*' in t:  # fixed-length string `String * N`
+            t = t.split('*')[0].strip()
+        if not t:
+            return True
+        low = t.lower()
+        if low in self._BUILTIN_TYPE_NAMES or low in self._INTRINSIC_TYPE_NAMES:
+            return True
+        if low in self.udts:
+            return True
+        if self._is_class_type(t) or self._is_enum_type(t):
+            return True
+        if '.' in t:
+            # Library-qualified (`Scripting.Dictionary`, `Excel.Range`): check
+            # the trailing segment, else accept — we don't model every host.
+            tail = t.rpartition('.')[2]
+            if self._is_known_type(tail):
+                return True
+            return True
+        sym = self.global_scope.resolve(t)
+        if sym and (sym.get('kind') or '').lower() in ('type', 'class', 'enum', 'library', 'module', 'form'):
+            return True
+        for m in self.modules:
+            if m.name.lower() == low:
+                return True
+        return False
+
+    def _check_type_known(self, type_name, line, filename, context):
+        """VBA120 — emit an 'undefined type' error if `type_name` is unknown."""
+        if self._is_known_type(type_name):
+            return
+        base = (type_name or '').replace('()', '').split('*')[0].strip()
+        self.errors.append({
+            "file": filename,
+            "line": line or 0,
+            "rule_id": "VBA120",
+            # Warning, not error: with an incomplete host model we cannot be
+            # certain an unresolved name is a typo vs. an un-modelled host
+            # type, so VBA120 surfaces the risk without gating compile-safety.
+            "severity": "warning",
+            "message": (
+                f"User-defined type '{base}' is not defined (in {context}). "
+                f"If it is a host type, load the matching model with `--host`."
+            ),
+        })
+
+    def _validate_declared_types(self, mod):
+        """Phase 1.6 — VBA120/122/123: resolve declared type names and reject
+        empty Type/Enum blocks."""
+        for tname, udt in mod.types.items():
+            is_enum = getattr(udt, 'is_enum', False)
+            if not udt.members:
+                self.errors.append({
+                    "file": mod.filename, "line": 0,
+                    "rule_id": "VBA123" if is_enum else "VBA122",
+                    "severity": "error",
+                    "message": (
+                        f"Enum '{tname}' has no members; an empty Enum is not allowed."
+                        if is_enum else
+                        f"Type '{tname}' has no members; a user-defined type must "
+                        f"declare at least one member."
+                    ),
+                })
+            elif not is_enum:
+                for m in udt.members:
+                    self._check_type_known(m.type_name, 0, mod.filename, f"Type {tname}")
+
+        for var in mod.variables:
+            if not getattr(var, 'is_enum_member', False):
+                self._check_type_known(var.type_name, 0, mod.filename, f"module '{mod.name}'")
+
+        for proc in mod.procedures:
+            line = getattr(proc, 'line', 0)
+            for arg in (proc.args or []):
+                self._check_type_known(arg.type_name, line, mod.filename,
+                                       f"{proc.proc_type} '{proc.name}'")
+            pt = (proc.proc_type or '').lower()
+            if pt.startswith('function') or pt == 'property get':
+                self._check_type_known(proc.return_type, line, mod.filename,
+                                       f"{proc.proc_type} '{proc.name}'")
 
     def _split_assignment(self, tokens):
         """If `tokens` is an assignment, return (lhs_tokens, eq_index, rhs_tokens, has_set).
@@ -1670,6 +1792,9 @@ class Analyzer:
                     current_type = "".join(type_parts)
                     if is_array:
                         current_type += "()"
+
+                    # Phase 1.6 — VBA120: resolve the declared local type.
+                    self._check_type_known(current_type, t.line, filename, context)
 
                     # Phase 2.8 — Fixed-length String only valid at module
                     # level (or inside UDTs). `Dim s As String * 10` inside
