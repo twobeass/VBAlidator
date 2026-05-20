@@ -319,6 +319,130 @@ _RULES: list[Rule] = [
         fix_hint="Use `s = vbNullString` for a String, or declare an array.",
     ),
 
+    # -- Phase 1.5: block-terminator pairing ------------------------
+    Rule(
+        rule_id="VBA110",
+        title="For without Next",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description=(
+            "A `For` / `For Each` loop body reached the end of the procedure "
+            "(or module) without a matching `Next`. VBE refuses to compile an "
+            "unterminated loop."
+        ),
+        fail_example="For i = 1 To 10\n    Debug.Print i",
+        ok_example="For i = 1 To 10\n    Debug.Print i\nNext i",
+        fix_hint="Add the matching `Next` (optionally `Next i`) that closes the loop.",
+    ),
+    Rule(
+        rule_id="VBA111",
+        title="Do without Loop",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `Do` block has no matching `Loop`.",
+        fail_example="Do While x < 10\n    x = x + 1",
+        ok_example="Do While x < 10\n    x = x + 1\nLoop",
+        fix_hint="Add the `Loop` (optionally `Loop While`/`Loop Until`) that closes the `Do`.",
+    ),
+    Rule(
+        rule_id="VBA112",
+        title="While without Wend",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `While` block has no matching `Wend`.",
+        fail_example="While x < 10\n    x = x + 1",
+        ok_example="While x < 10\n    x = x + 1\nWend",
+        fix_hint="Add the `Wend` that closes the `While`.",
+    ),
+    Rule(
+        rule_id="VBA113",
+        title="Expected End With",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `With` block has no matching `End With`.",
+        fail_example="With rng\n    .Value = 1",
+        ok_example="With rng\n    .Value = 1\nEnd With",
+        fix_hint="Add the `End With` that closes the block.",
+    ),
+    Rule(
+        rule_id="VBA114",
+        title="Select Case without End Select",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `Select Case` block has no matching `End Select`.",
+        fail_example="Select Case x\n    Case 1\n        Debug.Print 1",
+        ok_example="Select Case x\n    Case 1\n        Debug.Print 1\nEnd Select",
+        fix_hint="Add the `End Select` that closes the block.",
+    ),
+    Rule(
+        rule_id="VBA115",
+        title="Block If without End If",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description=(
+            "A block `If … Then` (the multi-line form, where `Then` is the "
+            "last token on the line) reached the end of the procedure without "
+            "a matching `End If`."
+        ),
+        fail_example="If x > 0 Then\n    Debug.Print x",
+        ok_example="If x > 0 Then\n    Debug.Print x\nEnd If",
+        fix_hint="Add the `End If`, or convert to a single-line `If x > 0 Then Debug.Print x`.",
+    ),
+    Rule(
+        rule_id="VBA116",
+        title="Next without For",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `Next` appears with no `For` loop open in scope.",
+        fail_example="    Debug.Print i\nNext i",
+        ok_example="For i = 1 To 10\n    Debug.Print i\nNext i",
+        fix_hint="Remove the stray `Next` or add the opening `For`.",
+    ),
+    Rule(
+        rule_id="VBA117",
+        title="Loop without Do",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `Loop` appears with no `Do` block open in scope.",
+        fail_example="    x = x + 1\nLoop",
+        ok_example="Do\n    x = x + 1\nLoop While x < 10",
+        fix_hint="Remove the stray `Loop` or add the opening `Do`.",
+    ),
+    Rule(
+        rule_id="VBA118",
+        title="Wend without While",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description="A `Wend` appears with no `While` block open in scope.",
+        fail_example="    x = x + 1\nWend",
+        ok_example="While x < 10\n    x = x + 1\nWend",
+        fix_hint="Remove the stray `Wend` or add the opening `While`.",
+    ),
+    Rule(
+        rule_id="VBA119",
+        title="Block terminator without matching opener",
+        severity="error",
+        category="syntax",
+        phase="1.5",
+        description=(
+            "A block terminator (`Else`, `ElseIf`, `End If`, `End Select`, "
+            "`End With`, …) appears with no matching opening statement in "
+            "scope — typically the symptom of an earlier mis-nested block."
+        ),
+        fail_example="Debug.Print 1\nEnd If",
+        ok_example="If x > 0 Then\n    Debug.Print 1\nEnd If",
+        fix_hint="Fix the surrounding block nesting; an opener is missing or an earlier block closed too early.",
+    ),
+
     # -- Phase 2.1: jumps -------------------------------------------
     Rule(
         rule_id="VBA201",

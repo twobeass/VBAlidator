@@ -710,12 +710,20 @@ class VBAParser:
                     # If marker is "Else", and we have "Else", it's a match.
                     return nodes
 
-                # VALIDATION: Check for unexpected block terminators
-                if val in ('next', 'loop', 'else', 'elseif', 'wend'):
-                    # Found a block keyword that was NOT in end_markers -> Unexpected
-                    self._record_syntax_error(
-                        f"Syntax Error: Unexpected '{self.current_token.value}'."
-                    )
+                # VALIDATION: Check for unexpected block terminators. These
+                # are the *inverse* of the missing-terminator checks in the
+                # individual block parsers: here a terminator appears with no
+                # matching opener in scope.
+                _INVERSE_TERMINATORS = {
+                    'next': ("Compile error: Next without For", "VBA116"),
+                    'loop': ("Compile error: Loop without Do", "VBA117"),
+                    'wend': ("Compile error: Wend without While", "VBA118"),
+                    'else': ("Compile error: Else without If", "VBA119"),
+                    'elseif': ("Compile error: ElseIf without If", "VBA119"),
+                }
+                if val in _INVERSE_TERMINATORS:
+                    msg, rid = _INVERSE_TERMINATORS[val]
+                    self._record_syntax_error(msg, rule_id=rid)
                     # We consume it to avoid infinite loop, but it's an error
                     self.consume_statement()
                     continue
@@ -725,7 +733,8 @@ class VBAParser:
                     if peek_val in ('if', 'select', 'with', 'function', 'sub', 'property'):
                         # Found End X that was NOT in end_markers -> Unexpected
                         self._record_syntax_error(
-                            f"Syntax Error: Unexpected 'End {self.peek().value}'."
+                            f"Compile error: End {self.peek().value} without matching block statement",
+                            rule_id="VBA119",
                         )
                         self.advance() # End
                         self.advance() # X
@@ -792,7 +801,9 @@ class VBAParser:
 
         body = self.parse_block(end_markers=["Wend"])
 
-        self.consume('IDENTIFIER', 'Wend')
+        if not self.consume('IDENTIFIER', 'Wend'):
+            self._record_syntax_error(
+                "Compile error: While without Wend", line=line, rule_id="VBA112")
         self.consume_statement()
 
         return DoNode(
@@ -804,25 +815,29 @@ class VBAParser:
         )
 
     def parse_with(self):
+        line = self.current_token.line
         self.consume('IDENTIFIER', 'With')
         expr_tokens = []
         while self.current_token.type not in ('NEWLINE', 'EOF'):
             expr_tokens.append(self.current_token)
             self.advance()
         self.consume_statement()
-        
+
         body = self.parse_block(end_markers=["End With"])
-        
-        self.consume('IDENTIFIER', 'End')
-        self.consume('IDENTIFIER', 'With')
-        self.consume_statement()
-        
+
+        if not self.consume('IDENTIFIER', 'End') or not self.consume('IDENTIFIER', 'With'):
+            self._record_syntax_error(
+                "Compile error: Expected End With", line=line, rule_id="VBA113")
+        else:
+            self.consume_statement()
+
         return WithNode(expr_tokens, body)
 
     def parse_if_stmt(self):
         # If <condition> Then <newline> [Block]
         # If <condition> Then <statement> [Else <statement>] [newline] [Single Line]
-        
+
+        if_line = self.current_token.line
         self.consume('IDENTIFIER', 'If')
         
         # Scavenge tokens until 'Then'
@@ -854,12 +869,13 @@ class VBAParser:
              
              else_blocks = []
              else_block = None
-             
+             end_if_seen = False
+
              while True:
                  tok = self.current_token
                  if tok.type == 'IDENTIFIER':
                      val = tok.value.lower()
-                     
+
                      if val == 'elseif':
                          self.advance()
                          # Parse condition Then
@@ -886,13 +902,19 @@ class VBAParser:
                              self.advance() # End
                              self.advance() # If
                              self.consume_statement()
+                             end_if_seen = True
                          break
-                     
+
                      else:
                          break
                  else:
                      break
-             
+
+             if not end_if_seen:
+                 self._record_syntax_error(
+                     "Compile error: Block If without End If",
+                     line=if_line, rule_id="VBA115")
+
              return IfNode(condition_tokens, true_block, else_blocks, else_block)
              
         else:
@@ -966,9 +988,11 @@ class VBAParser:
 
         body = self.parse_block(end_markers=["Next"])
 
-        self.consume('IDENTIFIER', 'Next')
-        # Optional variable name after Next (`Next i`).
-        if self.current_token.type == 'IDENTIFIER':
+        if not self.consume('IDENTIFIER', 'Next'):
+            self._record_syntax_error(
+                "Compile error: For without Next", line=line, rule_id="VBA110")
+        elif self.current_token.type == 'IDENTIFIER':
+            # Optional variable name after Next (`Next i`).
             self.advance()
         self.consume_statement()
 
@@ -1001,7 +1025,9 @@ class VBAParser:
 
         body = self.parse_block(end_markers=["Loop"])
 
-        self.consume('IDENTIFIER', 'Loop')
+        if not self.consume('IDENTIFIER', 'Loop'):
+            self._record_syntax_error(
+                "Compile error: Do without Loop", line=line, rule_id="VBA111")
         # Optional bottom-tested condition: Loop While <cond>  /  Loop Until <cond>
         if self.match('IDENTIFIER', 'While') or self.match('IDENTIFIER', 'Until'):
             self.advance()
@@ -1072,9 +1098,12 @@ class VBAParser:
                 )
                 self.consume_statement()
 
-        self.consume('IDENTIFIER', 'End')
-        self.consume('IDENTIFIER', 'Select')
-        self.consume_statement()
+        if not self.consume('IDENTIFIER', 'End') or not self.consume('IDENTIFIER', 'Select'):
+            self._record_syntax_error(
+                "Compile error: Select Case without End Select",
+                line=line, rule_id="VBA114")
+        else:
+            self.consume_statement()
 
         return SelectNode(expr_tokens=expr_tokens, cases=cases, line=line)
 

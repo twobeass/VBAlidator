@@ -20,6 +20,16 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA104`](VBA104.md) | 🔴 error | `declaration` | 1.4 | Erase target undefined |
 | [`VBA105`](VBA105.md) | 🔴 error | `declaration` | 1.4 | Erase target not a variable |
 | [`VBA106`](VBA106.md) | 🔴 error | `declaration` | 1.4 | Erase target is not an array |
+| [`VBA110`](VBA110.md) | 🔴 error | `syntax` | 1.5 | For without Next |
+| [`VBA111`](VBA111.md) | 🔴 error | `syntax` | 1.5 | Do without Loop |
+| [`VBA112`](VBA112.md) | 🔴 error | `syntax` | 1.5 | While without Wend |
+| [`VBA113`](VBA113.md) | 🔴 error | `syntax` | 1.5 | Expected End With |
+| [`VBA114`](VBA114.md) | 🔴 error | `syntax` | 1.5 | Select Case without End Select |
+| [`VBA115`](VBA115.md) | 🔴 error | `syntax` | 1.5 | Block If without End If |
+| [`VBA116`](VBA116.md) | 🔴 error | `syntax` | 1.5 | Next without For |
+| [`VBA117`](VBA117.md) | 🔴 error | `syntax` | 1.5 | Loop without Do |
+| [`VBA118`](VBA118.md) | 🔴 error | `syntax` | 1.5 | Wend without While |
+| [`VBA119`](VBA119.md) | 🔴 error | `syntax` | 1.5 | Block terminator without matching opener |
 | [`VBA201`](VBA201.md) | 🔴 error | `jump` | 2.1 | Jump target is not a label |
 | [`VBA210`](VBA210.md) | 🔴 error | `assignment` | 2.2 | `Set` used on a scalar target |
 | [`VBA211`](VBA211.md) | 🔴 error | `assignment` | 2.2 | Object assignment without `Set` |
@@ -46,4 +56,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*41 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*51 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

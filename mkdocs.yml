@@ -57,6 +57,9 @@ nav:
   - CI/CD: ci-cd.md
   - UAT walkthrough: uat.md
   - Roadmap: roadmap.md
+  - Compile-error coverage:
+      - Analysis: compile-error-analysis.md
+      - Roadmap & status: compile-error-roadmap.md
   - Changelog: changelog.md
 
 markdown_extensions:

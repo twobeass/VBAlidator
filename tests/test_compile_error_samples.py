@@ -21,6 +21,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "byref_mismatch": ("byref", "argument type mismatch"),
     "unreachable_code": ("unreachable",),
     "syntax_errors": ("syntax", "unexpected"),
+    "block_terminator": ("without", "expected end"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),
