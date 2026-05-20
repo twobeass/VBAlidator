@@ -107,8 +107,10 @@ def run_pipeline_on_files(
             analyzer.errors.append(lex_err.to_dict(filename=path.name))
             lexer_errors.append(lex_err)
 
-        pp = Preprocessor(tokens, config.definitions)
+        pp = Preprocessor(tokens, config.definitions, filename=path.name)
         processed_tokens = list(pp.process())
+        for pp_err in pp.errors:
+            analyzer.errors.append(pp_err)
 
         parser = VBAParser(processed_tokens, filename=path.name)
         module_node = parser.parse_module()
@@ -137,8 +139,10 @@ def run_pipeline_on_source(code: str, module_type: str = "Module") -> AnalysisRe
     for lex_err in lexer.errors:
         analyzer.errors.append(lex_err.to_dict(filename="<inline>"))
 
-    pp = Preprocessor(tokens, config.definitions)
+    pp = Preprocessor(tokens, config.definitions, filename="<inline>")
     processed_tokens = list(pp.process())
+    for pp_err in pp.errors:
+        analyzer.errors.append(pp_err)
 
     parser = VBAParser(processed_tokens, filename="<inline>")
     module_node = parser.parse_module()

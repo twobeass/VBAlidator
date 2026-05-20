@@ -279,8 +279,10 @@ def precheck(
         for lex_err in lexer.errors:
             analyzer.errors.append(lex_err.to_dict(filename=filename))
 
-        pp = Preprocessor(tokens, config.definitions)
+        pp = Preprocessor(tokens, config.definitions, filename=filename)
         processed_tokens = list(pp.process())
+        for pp_err in pp.errors:
+            analyzer.errors.append(pp_err)
 
         parser = VBAParser(processed_tokens, filename=filename)
         module_node = parser.parse_module()
@@ -374,8 +376,10 @@ def precheck_source(
     for lex_err in lexer.errors:
         analyzer.errors.append(lex_err.to_dict(filename=name))
 
-    pp = Preprocessor(tokens, config.definitions)
+    pp = Preprocessor(tokens, config.definitions, filename=name)
     processed = list(pp.process())
+    for pp_err in pp.errors:
+        analyzer.errors.append(pp_err)
     parser = VBAParser(processed, filename=name)
     module_node = parser.parse_module()
     module_node.filename = name

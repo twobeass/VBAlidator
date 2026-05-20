@@ -47,6 +47,9 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA182`](VBA182.md) | 🔴 error | `placement` | 3.7 | Deftype statement must precede declarations |
 | [`VBA183`](VBA183.md) | 🔴 error | `placement` | 3.7 | Duplicate Deftype letter range |
 | [`VBA184`](VBA184.md) | 🔴 error | `placement` | 3.7 | Duplicate Option statement |
+| [`VBA190`](VBA190.md) | 🔴 error | `preprocessor` | 3.8 | Conditional directive without matching #If |
+| [`VBA191`](VBA191.md) | 🔴 error | `preprocessor` | 3.8 | Missing #End If |
+| [`VBA192`](VBA192.md) | 🔴 error | `preprocessor` | 3.8 | Invalid #Const declaration |
 | [`VBA201`](VBA201.md) | 🔴 error | `jump` | 2.1 | Jump target is not a label |
 | [`VBA210`](VBA210.md) | 🔴 error | `assignment` | 2.2 | `Set` used on a scalar target |
 | [`VBA211`](VBA211.md) | 🔴 error | `assignment` | 2.2 | Object assignment without `Set` |
@@ -73,4 +76,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*68 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*71 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

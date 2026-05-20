@@ -1035,6 +1035,44 @@ _RULES: list[Rule] = [
         ok_example="Option Explicit",
         fix_hint="Remove the duplicate `Option` statement.",
     ),
+
+    # -- Phase 3.8 — conditional compilation (#If) ------------------
+    Rule(
+        rule_id="VBA190",
+        title="Conditional directive without matching #If",
+        severity="error",
+        category="preprocessor",
+        phase="3.8",
+        description=(
+            "`#Else`, `#ElseIf` and `#End If` must be preceded by a matching "
+            "`#If`. A directive with no open `#If` is a compile error."
+        ),
+        fail_example="#Else\n    x = 1\n#End If",
+        ok_example="#If Win64 Then\n    x = 1\n#Else\n    x = 2\n#End If",
+        fix_hint="Add the opening `#If … Then`, or remove the orphan directive.",
+    ),
+    Rule(
+        rule_id="VBA191",
+        title="Missing #End If",
+        severity="error",
+        category="preprocessor",
+        phase="3.8",
+        description="Every `#If` conditional-compilation block must be closed with `#End If`.",
+        fail_example="#If Win64 Then\n    x = 1",
+        ok_example="#If Win64 Then\n    x = 1\n#End If",
+        fix_hint="Add the `#End If` that closes the `#If` block.",
+    ),
+    Rule(
+        rule_id="VBA192",
+        title="Invalid #Const declaration",
+        severity="error",
+        category="preprocessor",
+        phase="3.8",
+        description="A `#Const` directive must have the form `#Const Name = expression`.",
+        fail_example="#Const",
+        ok_example="#Const DEBUG_BUILD = 1",
+        fix_hint="Write `#Const Name = <constant expression>`.",
+    ),
 ]
 
 

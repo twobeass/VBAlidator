@@ -103,10 +103,23 @@ def _safe_eval(node, env: SafeDict):
 
 
 class Preprocessor:
-    def __init__(self, tokens, defines):
+    def __init__(self, tokens, defines, filename="Unknown"):
         self.tokens = tokens
         self.defines = defines
+        self.filename = filename
         self.stack = [{"active": True, "taken": False}] # Root scope
+        # Conditional-compilation directive diagnostics (VBA190-VBA192).
+        self.errors = []
+
+    def _record(self, message, line, rule_id):
+        self.errors.append({
+            "file": self.filename,
+            "line": line if line is not None else 0,
+            "rule_id": rule_id,
+            "severity": "error",
+            "category": "preprocessor",
+            "message": message,
+        })
 
     def evaluate(self, tokens):
         # Convert tokens to a Python-parseable expression. VBA `=` becomes
@@ -147,6 +160,7 @@ class Preprocessor:
         while current_token:
             if current_token.type == 'PREPROCESSOR':
                 directive = current_token.value.lower()
+                directive_tok = current_token
 
                 # Handle #If
                 if directive == '#if':
@@ -179,26 +193,38 @@ class Preprocessor:
                          cond_tokens.append(current_token)
                          current_token = next(iterator, None)
 
-                    current_scope = self.stack[-1]
-                    parent = self.stack[-2] # Parent of current #If
-
-                    if parent["active"] and not current_scope["taken"]:
-                        result = self.evaluate(cond_tokens)
-                        current_scope["active"] = result
-                        if result: current_scope["taken"] = True
+                    if len(self.stack) < 2:
+                        # VBA190 — #ElseIf with no open #If.
+                        self._record(
+                            "Compile error: #ElseIf must be preceded by a matching #If",
+                            getattr(directive_tok, 'line', None), "VBA190")
                     else:
-                        current_scope["active"] = False
+                        current_scope = self.stack[-1]
+                        parent = self.stack[-2] # Parent of current #If
+
+                        if parent["active"] and not current_scope["taken"]:
+                            result = self.evaluate(cond_tokens)
+                            current_scope["active"] = result
+                            if result: current_scope["taken"] = True
+                        else:
+                            current_scope["active"] = False
 
                 # Handle #Else
                 elif directive == '#else':
-                    current_scope = self.stack[-1]
-                    parent = self.stack[-2]
-
-                    if parent["active"] and not current_scope["taken"]:
-                        current_scope["active"] = True
-                        current_scope["taken"] = True
+                    if len(self.stack) < 2:
+                        # VBA190 — #Else with no open #If.
+                        self._record(
+                            "Compile error: #Else must be preceded by a matching #If",
+                            getattr(directive_tok, 'line', None), "VBA190")
                     else:
-                        current_scope["active"] = False
+                        current_scope = self.stack[-1]
+                        parent = self.stack[-2]
+
+                        if parent["active"] and not current_scope["taken"]:
+                            current_scope["active"] = True
+                            current_scope["taken"] = True
+                        else:
+                            current_scope["active"] = False
 
                     current_token = next(iterator, None) # Consume newline if present?
 
@@ -206,7 +232,16 @@ class Preprocessor:
                 elif directive == '#end':
                     # Check next token for 'if'
                     next_tok = next(iterator, None)
-                    if next_tok and next_tok.value.lower() == 'if':
+                    if len(self.stack) < 2:
+                        # VBA190 — #End If with no open #If.
+                        self._record(
+                            "Compile error: #End If without #If",
+                            getattr(directive_tok, 'line', None), "VBA190")
+                        if next_tok and next_tok.value.lower() == 'if':
+                            current_token = next(iterator, None)
+                        else:
+                            current_token = next_tok
+                    elif next_tok and next_tok.value.lower() == 'if':
                          self.stack.pop()
                          current_token = next(iterator, None)
                     else:
@@ -237,11 +272,17 @@ class Preprocessor:
                                    val = self.evaluate(expr_tokens)
                                    self.defines[const_name.upper()] = val
                          else:
-                              # Syntax error in #Const, skip line
+                              # VBA192 — #Const Identifier without `= expression`.
+                              self._record(
+                                  "Compile error: Invalid syntax for conditional compiler constant declaration",
+                                  getattr(directive_tok, 'line', None), "VBA192")
                               while current_token and current_token.type not in ('NEWLINE', 'EOF'):
                                    current_token = next(iterator, None)
                     else:
-                         # Syntax error
+                         # VBA192 — #Const with no constant name.
+                         self._record(
+                             "Compile error: Invalid syntax for conditional compiler constant declaration",
+                             getattr(directive_tok, 'line', None), "VBA192")
                          while current_token and current_token.type not in ('NEWLINE', 'EOF'):
                               current_token = next(iterator, None)
 
@@ -266,3 +307,9 @@ class Preprocessor:
                         yield current_token
 
                 current_token = next(iterator, None)
+
+        # VBA191 — every #If must be closed by an #End If. Anything left on
+        # the stack above the root scope is an unterminated conditional block.
+        if len(self.stack) > 1:
+            self._record(
+                "Compile error: Missing #End If", None, "VBA191")

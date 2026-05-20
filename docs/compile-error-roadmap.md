@@ -20,10 +20,10 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
 | 8  | Statement-Platzierung / Def / Option | VBA180–VBA184 (VBA185 zurückgestellt) | ✅ fertig |
-| 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ⬜ geplant |
+| 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX003–006 | ⬜ geplant |
 
-Regeln gesamt: **41 → 68** (nach Welle 8).
+Regeln gesamt: **41 → 71** (nach Welle 9).
 
 ---
 
@@ -151,6 +151,23 @@ formatabhängig, hohes FP-Risiko.
 
 **Tests:** `tests/test_phase37_placement_def_option.py` (je Regel +
 Gegenbeispiele), Fixtures in `tests/samples/compile_errors/placement_def_option/`.
+
+---
+
+## Welle 9 — Bedingte Kompilierung ✅
+
+Abgeschlossen (preprocessor-seitig). `Preprocessor` sammelt jetzt Fehler
+(`self.errors`) und bekommt einen `filename`; alle vier Aufrufstellen
+(`api.py` ×2, `conftest.py` ×2) hängen `pp.errors` an `analyzer.errors`.
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA190 | Conditional directive without matching #If | `#Else`/`#ElseIf`/`#End If` ohne offenes `#If` (Stack-Unterlauf) |
+| VBA191 | Missing #End If | Stack am Ende > Root → unterminiertes `#If` |
+| VBA192 | Invalid #Const declaration | `#Const` ohne Name oder `= expression` |
+
+**Tests:** `tests/test_phase38_conditional_compilation.py` (6 Fälle inkl.
+Gegenbeispiele), Fixtures in `tests/samples/compile_errors/conditional_compilation/`.
 
 ---
 
