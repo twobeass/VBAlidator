@@ -14,7 +14,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 |-------|-------|-----------|--------|
 | 1  | Block-Terminator-Paarung | VBA110–VBA119 | ✅ fertig |
 | 2  | Deklarations-Typauflösung | VBA120–VBA123 | ⬜ geplant |
-| 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ⬜ geplant |
+| 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ✅ fertig |
 | 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
 | 5  | Prozedur-/Property-Konsistenz | VBA150–VBA154 | ⬜ geplant |
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
@@ -23,7 +23,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ⬜ geplant |
 | 10 | Lexer-Ergänzungen | VBA_LEX003–006 | ⬜ geplant |
 
-Regeln gesamt: **41 → 51** (nach Welle 1).
+Regeln gesamt: **41 → 57** (nach Welle 3).
 
 ---
 
@@ -70,6 +70,34 @@ ein sekundäres VBA119 für das verschluckte `End Sub` erzeugt. Beide zeigen auf
 dieselbe Fehlerregion; die primäre Meldung ist korrekt. Eine Entkopplung
 (Proc-Terminatoren nicht in `parse_block` konsumieren) ist als spätere
 Verfeinerung notiert.
+
+---
+
+## Welle 3 — Argumentlisten-Wohlgeformtheit ✅
+
+Abgeschlossen. Neuer Validator `_validate_param_lists(mod)` (analyzer.py),
+rein syntaktisch über `proc.args`, aufgerufen in `pass2_resolution`.
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA130 | Required parameter after Optional | Pflichtparameter nach `Optional` |
+| VBA131 | ParamArray is not the last parameter | `ParamArray` nicht als letzter |
+| VBA132 | More than one ParamArray | mehr als ein `ParamArray` |
+| VBA133 | ParamArray combined with Optional | `Optional` + `ParamArray` gemischt |
+| VBA134 | ParamArray element type is not Variant | `ParamArray x() As <≠Variant>` |
+| VBA136 | Array parameter passed ByVal | `ByVal arr() As …` |
+
+**Wichtige FP-Korrektur:** Der Wert-Parameter (`RHS`) eines `Property
+Let`/`Set` ist implizit Pflicht und darf nach Optional-Index-Parametern
+stehen — der letzte Parameter von Let/Set ist daher von VBA130 ausgenommen
+(sonst Falsch-Positive in realen Bibliotheken wie JSONBag/stdVBA).
+
+**VBA135 (Invalid optional parameter type) zurückgestellt:** kontextabhängig,
+kein eindeutiger Compile-Fehler → hohes FP-Risiko, bewusst nicht implementiert.
+
+**Tests:** `tests/test_phase210_param_lists.py` (je Regel + „well-formed bleibt
+sauber"), Fixtures in `tests/samples/compile_errors/param_list/`. FP-Wächter
+grün.
 
 ---
 

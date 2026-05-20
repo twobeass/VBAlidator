@@ -30,6 +30,12 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA117`](VBA117.md) | 🔴 error | `syntax` | 1.5 | Loop without Do |
 | [`VBA118`](VBA118.md) | 🔴 error | `syntax` | 1.5 | Wend without While |
 | [`VBA119`](VBA119.md) | 🔴 error | `syntax` | 1.5 | Block terminator without matching opener |
+| [`VBA130`](VBA130.md) | 🔴 error | `signature` | 2.10 | Required parameter after Optional |
+| [`VBA131`](VBA131.md) | 🔴 error | `signature` | 2.10 | ParamArray is not the last parameter |
+| [`VBA132`](VBA132.md) | 🔴 error | `signature` | 2.10 | More than one ParamArray |
+| [`VBA133`](VBA133.md) | 🔴 error | `signature` | 2.10 | ParamArray combined with Optional |
+| [`VBA134`](VBA134.md) | 🔴 error | `signature` | 2.10 | ParamArray element type is not Variant |
+| [`VBA136`](VBA136.md) | 🔴 error | `signature` | 2.10 | Array parameter passed ByVal |
 | [`VBA201`](VBA201.md) | 🔴 error | `jump` | 2.1 | Jump target is not a label |
 | [`VBA210`](VBA210.md) | 🔴 error | `assignment` | 2.2 | `Set` used on a scalar target |
 | [`VBA211`](VBA211.md) | 🔴 error | `assignment` | 2.2 | Object assignment without `Set` |
@@ -56,4 +62,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*51 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*57 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

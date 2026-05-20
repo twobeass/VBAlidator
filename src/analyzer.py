@@ -160,6 +160,9 @@ class Analyzer:
             # Phase 2.3 — Property Get/Let/Set arity & type compatibility
             self._validate_property_arity(mod)
 
+            # Phase 2.10 — argument-list well-formedness (VBA130-VBA136)
+            self._validate_param_lists(mod)
+
             # Phase 3.3 — Declare PtrSafe (64-bit) requirement
             self._validate_ptrsafe_declares(mod)
 
@@ -479,6 +482,101 @@ class Analyzer:
                             f"is object type '{last_arg.type_name}'; use Property Set instead."
                         ),
                     })
+
+    def _validate_param_lists(self, mod):
+        """Phase 2.10 — argument-list well-formedness (VBA130-VBA136).
+
+        Pure syntactic checks over each procedure's declared parameters; no
+        type model required, so these never false-positive on valid code.
+        """
+        for proc in mod.procedures:
+            args = getattr(proc, 'args', None) or []
+            if not args:
+                continue
+            line = getattr(proc, 'line', 0) or 0
+            ptype = proc.proc_type or "procedure"
+            # The trailing value parameter of a Property Let/Set is implicitly
+            # required (it receives the assigned RHS) and may legitimately
+            # follow Optional index parameters — exempt it from VBA130.
+            ptl = ptype.lower()
+            is_value_param_proc = ptl.startswith('property') and ptl.split()[-1] in ('let', 'set')
+            seen_optional = False
+            paramarray_count = 0
+            n = len(args)
+            for idx, arg in enumerate(args):
+                is_opt = getattr(arg, 'is_optional', False)
+                is_pa = getattr(arg, 'is_paramarray', False)
+
+                # VBA130 — once an Optional appears, every following parameter
+                # must be Optional (or the trailing ParamArray).
+                if is_opt:
+                    seen_optional = True
+                elif seen_optional and not is_pa and not (is_value_param_proc and idx == n - 1):
+                    self.errors.append({
+                        "file": mod.filename, "line": line,
+                        "rule_id": "VBA130", "severity": "error",
+                        "message": (
+                            f"Parameter '{arg.name}' of {ptype} '{proc.name}' is "
+                            f"required but follows an Optional parameter. Every "
+                            f"parameter after the first Optional must also be Optional."
+                        ),
+                    })
+
+                if is_pa:
+                    paramarray_count += 1
+                    # VBA131 — ParamArray must be the last parameter.
+                    if idx != n - 1:
+                        self.errors.append({
+                            "file": mod.filename, "line": line,
+                            "rule_id": "VBA131", "severity": "error",
+                            "message": (
+                                f"ParamArray '{arg.name}' must be the last parameter "
+                                f"of {ptype} '{proc.name}'."
+                            ),
+                        })
+                    # VBA132 — only one ParamArray allowed.
+                    if paramarray_count > 1:
+                        self.errors.append({
+                            "file": mod.filename, "line": line,
+                            "rule_id": "VBA132", "severity": "error",
+                            "message": (
+                                f"{ptype} '{proc.name}' declares more than one "
+                                f"ParamArray; only one is allowed."
+                            ),
+                        })
+                    # VBA134 — ParamArray element type must be Variant.
+                    base = (arg.type_name or 'Variant').replace('()', '').strip()
+                    if base and base.lower() != 'variant':
+                        self.errors.append({
+                            "file": mod.filename, "line": line,
+                            "rule_id": "VBA134", "severity": "error",
+                            "message": (
+                                f"ParamArray '{arg.name}' must be declared as an array "
+                                f"of Variant, not '{arg.type_name}'."
+                            ),
+                        })
+
+                # VBA136 — array parameters cannot be passed ByVal.
+                if (arg.type_name or '').endswith('()') and getattr(arg, 'mechanism', 'ByRef') == 'ByVal':
+                    self.errors.append({
+                        "file": mod.filename, "line": line,
+                        "rule_id": "VBA136", "severity": "error",
+                        "message": (
+                            f"Array parameter '{arg.name}' of {ptype} '{proc.name}' "
+                            f"must be passed ByRef, not ByVal."
+                        ),
+                    })
+
+            # VBA133 — a ParamArray cannot coexist with Optional parameters.
+            if paramarray_count and any(getattr(a, 'is_optional', False) for a in args):
+                self.errors.append({
+                    "file": mod.filename, "line": line,
+                    "rule_id": "VBA133", "severity": "error",
+                    "message": (
+                        f"{ptype} '{proc.name}' combines Optional parameters with a "
+                        f"ParamArray; this is not allowed."
+                    ),
+                })
 
     def analyze_procedure(self, proc, mod_scope, mod):
         proc_scope = SymbolTable(proc.name, parent=mod_scope, scope_type='Procedure')

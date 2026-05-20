@@ -22,6 +22,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "unreachable_code": ("unreachable",),
     "syntax_errors": ("syntax", "unexpected"),
     "block_terminator": ("without", "expected end"),
+    "param_list": ("paramarray", "parameter", "optional", "byref"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

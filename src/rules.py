@@ -443,6 +443,77 @@ _RULES: list[Rule] = [
         fix_hint="Fix the surrounding block nesting; an opener is missing or an earlier block closed too early.",
     ),
 
+    # -- Phase 2.10: parameter-list well-formedness -----------------
+    Rule(
+        rule_id="VBA130",
+        title="Required parameter after Optional",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description=(
+            "Once a parameter is declared `Optional`, every parameter after "
+            "it must also be `Optional` (the trailing `ParamArray` aside)."
+        ),
+        fail_example="Sub S(Optional a As Long, b As Long): End Sub",
+        ok_example="Sub S(Optional a As Long, Optional b As Long): End Sub",
+        fix_hint="Mark the trailing parameters `Optional`, or move the required ones before the first Optional.",
+    ),
+    Rule(
+        rule_id="VBA131",
+        title="ParamArray is not the last parameter",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="`ParamArray` must be the final parameter of a procedure.",
+        fail_example="Sub S(ParamArray a() As Variant, b As Long): End Sub",
+        ok_example="Sub S(b As Long, ParamArray a() As Variant): End Sub",
+        fix_hint="Move the `ParamArray` to the end of the parameter list.",
+    ),
+    Rule(
+        rule_id="VBA132",
+        title="More than one ParamArray",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="A procedure may declare at most one `ParamArray`.",
+        fail_example="Sub S(ParamArray a() As Variant, ParamArray b() As Variant): End Sub",
+        ok_example="Sub S(ParamArray a() As Variant): End Sub",
+        fix_hint="Keep a single `ParamArray` and pass the rest explicitly.",
+    ),
+    Rule(
+        rule_id="VBA133",
+        title="ParamArray combined with Optional",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="A procedure cannot mix `Optional` parameters with a `ParamArray`.",
+        fail_example="Sub S(Optional a As Long, ParamArray b() As Variant): End Sub",
+        ok_example="Sub S(a As Long, ParamArray b() As Variant): End Sub",
+        fix_hint="Drop the `Optional` markers or the `ParamArray` — they are mutually exclusive.",
+    ),
+    Rule(
+        rule_id="VBA134",
+        title="ParamArray element type is not Variant",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="A `ParamArray` must be declared as an array of `Variant`.",
+        fail_example="Sub S(ParamArray a() As Long): End Sub",
+        ok_example="Sub S(ParamArray a() As Variant): End Sub",
+        fix_hint="Declare the ParamArray as `ParamArray name() As Variant`.",
+    ),
+    Rule(
+        rule_id="VBA136",
+        title="Array parameter passed ByVal",
+        severity="error",
+        category="signature",
+        phase="2.10",
+        description="Array parameters must be passed `ByRef`; `ByVal` arrays are illegal in VBA.",
+        fail_example="Sub S(ByVal a() As Long): End Sub",
+        ok_example="Sub S(ByRef a() As Long): End Sub",
+        fix_hint="Change the parameter mechanism to `ByRef` (the default).",
+    ),
+
     # -- Phase 2.1: jumps -------------------------------------------
     Rule(
         rule_id="VBA201",

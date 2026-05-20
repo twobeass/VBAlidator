@@ -48,6 +48,7 @@ class ProcedureNode(Node):
         self.args = [] # List of VariableNode
         self.locals = [] # List of VariableNode
         self.body = [] # List of nodes (StatementNode, WithNode)
+        self.line = 0 # 1-based source line of the declaration (diagnostics)
 
     def __repr__(self):
         decl = "Declare " if self.is_declare else ""
@@ -457,11 +458,13 @@ class VBAParser:
         if self.match('IDENTIFIER', 'Event'):
             self.advance()
             event_name = "Unknown"
+            event_name_line = self.current_token.line
             if self.current_token.type == 'IDENTIFIER':
                 event_name = self.current_token.value
                 self.advance()
 
             proc = ProcedureNode(event_name, 'Event', scope=scope)
+            proc.line = event_name_line
 
             if self.match('OPERATOR', '('):
                 self.parse_arg_list(proc)
@@ -517,6 +520,7 @@ class VBAParser:
                 is_ptrsafe=is_ptrsafe,
             )
             proc.declare_line = declare_line  # used for diagnostics
+            proc.line = declare_line
 
             # Args (...)
             if self.match('OPERATOR', '('):
@@ -612,19 +616,21 @@ class VBAParser:
         return "".join(type_parts)
 
     def procedures_parse(self, module, scope):
-        proc_type = self.current_token.value 
+        proc_line = self.current_token.line
+        proc_type = self.current_token.value
         self.advance()
-        
+
         if self.match('IDENTIFIER', 'Get') or self.match('IDENTIFIER', 'Let') or self.match('IDENTIFIER', 'Set'):
             proc_type += " " + self.current_token.value
             self.advance()
-            
+
         proc_name = "Unknown"
         if self.current_token.type == 'IDENTIFIER':
             proc_name = self.current_token.value
             self.advance()
-            
+
         proc = ProcedureNode(proc_name, proc_type, scope=scope)
+        proc.line = proc_line
         
         # Args
         if self.match('OPERATOR', '('):
