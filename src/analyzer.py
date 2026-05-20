@@ -165,6 +165,9 @@ class Analyzer:
             # Phase 2.10 — argument-list well-formedness (VBA130-VBA136)
             self._validate_param_lists(mod)
 
+            # Phase 2.12 — duplicate procedure names (VBA150)
+            self._validate_duplicate_procedures(mod)
+
             # Phase 3.3 — Declare PtrSafe (64-bit) requirement
             self._validate_ptrsafe_declares(mod)
 
@@ -224,8 +227,9 @@ class Analyzer:
                     if proc.scope.lower() not in ('public', 'friend'):
                         continue
                     expected_name = f"{iface_name}_{proc.name}"
-                    found = any(p.name.lower() == expected_name.lower() for p in mod.procedures)
-                    if not found:
+                    impl = next((p for p in mod.procedures
+                                 if p.name.lower() == expected_name.lower()), None)
+                    if impl is None:
                         self.errors.append({
                             "file": mod.filename,
                             "line": 0,
@@ -237,6 +241,23 @@ class Analyzer:
                                 f"(matching {proc.proc_type} {proc.name})."
                             ),
                         })
+                    else:
+                        # VBA153 — the implementing method exists but its
+                        # parameter count disagrees with the interface member.
+                        iface_argc = len(getattr(proc, 'args', []) or [])
+                        impl_argc = len(getattr(impl, 'args', []) or [])
+                        if iface_argc != impl_argc:
+                            self.errors.append({
+                                "file": mod.filename,
+                                "line": getattr(impl, 'line', 0) or 0,
+                                "rule_id": "VBA153",
+                                "severity": "error",
+                                "message": (
+                                    f"'{expected_name}' does not match the interface "
+                                    f"member '{iface_name}.{proc.name}': expected "
+                                    f"{iface_argc} parameter(s), got {impl_argc}."
+                                ),
+                            })
 
     def _find_interface_module(self, iface_name):
         target = iface_name.lower()
@@ -460,6 +481,27 @@ class Analyzer:
                 # Set/Let semantic mismatch — independent of Get presence.
                 last_arg = accessor.args[-1]
                 kind = accessor.proc_type.split()[-1].lower()
+
+                # VBA152 — a Property Get and its Let must agree on the value
+                # type. Restricted to clearly-scalar primitives on both sides
+                # to stay false-positive-safe (object hierarchies / Variant
+                # coercions are intentionally not flagged).
+                if get_proc is not None and kind == 'let':
+                    get_t = (get_proc.return_type or 'Variant')
+                    let_t = (last_arg.type_name or 'Variant')
+                    if (self._is_clearly_scalar(get_t) and self._is_clearly_scalar(let_t)
+                            and get_t.replace('()', '').strip().lower()
+                                != let_t.replace('()', '').strip().lower()):
+                        self.errors.append({
+                            "file": mod.filename,
+                            "line": getattr(accessor, 'line', 0) or 0,
+                            "rule_id": "VBA152",
+                            "severity": "error",
+                            "message": (
+                                f"Property '{accessor.name}' is inconsistent: Property Get "
+                                f"returns '{get_t}' but Property Let takes '{let_t}'."
+                            ),
+                        })
                 rhs_is_object = self._is_clearly_object(last_arg.type_name)
                 rhs_is_scalar = self._is_clearly_scalar(last_arg.type_name)
                 if kind == 'set' and rhs_is_scalar:
@@ -484,6 +526,37 @@ class Analyzer:
                             f"is object type '{last_arg.type_name}'; use Property Set instead."
                         ),
                     })
+
+    def _validate_duplicate_procedures(self, mod):
+        """VBA150 — two procedures share a name in the same module.
+
+        Property Get/Let/Set legitimately share a name (different accessor
+        kinds), so the dedup key includes the accessor kind for properties.
+        Property and non-property members are grouped separately to avoid
+        edge-case false positives.
+        """
+        seen = {}
+        for proc in mod.procedures:
+            ptype = (proc.proc_type or '').lower()
+            if ptype == 'event':
+                continue  # events have their own declaration namespace
+            if ptype.startswith('property'):
+                key = ('prop', proc.name.lower(), ptype.split()[-1])
+            else:
+                key = ('proc', proc.name.lower())
+            if key in seen:
+                self.errors.append({
+                    "file": mod.filename,
+                    "line": getattr(proc, 'line', 0) or 0,
+                    "rule_id": "VBA150",
+                    "severity": "error",
+                    "message": (
+                        f"Ambiguous name detected: '{proc.name}' is already defined "
+                        f"in module '{mod.name}'."
+                    ),
+                })
+            else:
+                seen[key] = proc
 
     def _validate_param_lists(self, mod):
         """Phase 2.10 — argument-list well-formedness (VBA130-VBA136).

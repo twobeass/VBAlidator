@@ -563,6 +563,64 @@ _RULES: list[Rule] = [
         fix_hint="Declare the label or fix the spelling. Special forms `On Error GoTo 0`, `On Error GoTo -1`, and `On Error Resume Next` do not need a target.",
     ),
 
+    # -- Phase 2.12: procedure / property consistency ---------------
+    Rule(
+        rule_id="VBA150",
+        title="Ambiguous name detected (duplicate procedure)",
+        severity="error",
+        category="declaration",
+        phase="2.12",
+        description=(
+            "Two procedures share the same name in one module. Property "
+            "Get/Let/Set may share a name, but two of the same accessor kind "
+            "(or two Subs/Functions) may not."
+        ),
+        fail_example="Sub Foo()\nEnd Sub\nSub Foo()\nEnd Sub",
+        ok_example="Sub Foo()\nEnd Sub\nSub Bar()\nEnd Sub",
+        fix_hint="Rename or remove the duplicate procedure.",
+    ),
+    Rule(
+        rule_id="VBA152",
+        title="Property Get/Let type inconsistent",
+        severity="error",
+        category="property",
+        phase="2.12",
+        description=(
+            "A `Property Get` return type and the matching `Property Let` "
+            "value-parameter type must agree."
+        ),
+        fail_example=(
+            "Property Get Foo() As Long\nEnd Property\n"
+            "Property Let Foo(ByVal v As String)\nEnd Property"
+        ),
+        ok_example=(
+            "Property Get Foo() As Long\nEnd Property\n"
+            "Property Let Foo(ByVal v As Long)\nEnd Property"
+        ),
+        fix_hint="Make the Get return type and the Let value-parameter type identical.",
+    ),
+    Rule(
+        rule_id="VBA153",
+        title="Implements method signature mismatch",
+        severity="error",
+        category="interface",
+        phase="2.12",
+        description=(
+            "A method implementing an interface member must match the "
+            "member's parameter count."
+        ),
+        fail_example=(
+            "' IShape: Public Sub Draw(ByVal scale As Double)\n"
+            "Implements IShape\n"
+            "Private Sub IShape_Draw()\nEnd Sub"
+        ),
+        ok_example=(
+            "Implements IShape\n"
+            "Private Sub IShape_Draw(ByVal scale As Double)\nEnd Sub"
+        ),
+        fix_hint="Match the interface member's parameter list exactly.",
+    ),
+
     # -- Phase 2.11: loop / label context ---------------------------
     Rule(
         rule_id="VBA170",

@@ -27,6 +27,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "placement_def_option": ("invalid inside", "deftype", "duplicate option", "duplicate definition"),
     "conditional_compilation": ("#if", "#else", "#end if", "#const"),
     "lexer_limits": ("unterminated", "missing end bracket", "exceeding", "characters long"),
+    "proc_consistency": ("ambiguous name", "inconsistent", "does not match the interface"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

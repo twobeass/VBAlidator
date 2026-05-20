@@ -16,14 +16,14 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 2  | Deklarations-Typauflösung | VBA120–VBA123 | ⬜ geplant |
 | 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ✅ fertig |
 | 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
-| 5  | Prozedur-/Property-Konsistenz | VBA150–VBA154 | ⬜ geplant |
+| 5  | Prozedur-/Property-Konsistenz | VBA150,152,153 (151/154 zurückgestellt) | ✅ fertig |
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
 | 8  | Statement-Platzierung / Def / Option | VBA180–VBA184 (VBA185 zurückgestellt) | ✅ fertig |
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 74** (nach Welle 10).
+Regeln gesamt: **41 → 77** (nach Welle 5).
 
 ---
 
@@ -187,6 +187,31 @@ Parser-/Deklarationskontext (`Dim x% As String`), gehört nicht auf Lexer-Ebene
 
 **Tests:** `tests/test_phase39_lexer_limits.py` (7 Fälle inkl. Gegenbeispiele),
 Fixtures in `tests/samples/compile_errors/lexer_limits/`.
+
+---
+
+## Welle 5 — Prozedur-/Property-Konsistenz ✅
+
+Abgeschlossen.
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA150 | Ambiguous name detected (duplicate procedure) | zwei Prozeduren gleichen Namens (Property Get/Let/Set ausgenommen) |
+| VBA152 | Property Get/Let type inconsistent | Get-Rückgabetyp ≠ Let-Wertparametertyp (nur klar-skalare Typen) |
+| VBA153 | Implements method signature mismatch | Implementierungsmethode mit falscher Parameteranzahl |
+
+**Umsetzung:** neuer Validator `_validate_duplicate_procedures` (VBA150);
+VBA152 in `_validate_property_arity` ergänzt (auf klar-skalare Typen
+beschränkt → FP-sicher); VBA153 erweitert den bestehenden `_validate_implements`
+um einen Parameteranzahl-Abgleich.
+
+**VBA151 (Only comments after End Sub/Function/Property) zurückgestellt:**
+überlappt mit VBA361 (executable at module level). **VBA154 (Procedure type
+mismatch / AddressOf) zurückgestellt:** erfordert Signatur-Typsystem, hohe
+Komplexität/FP.
+
+**Tests:** `tests/test_phase212_proc_consistency.py` (7 Fälle inkl.
+Mehrmodul-Implements), Fixtures in `tests/samples/compile_errors/proc_consistency/`.
 
 ---
 
