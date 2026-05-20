@@ -36,6 +36,12 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA133`](VBA133.md) | 🔴 error | `signature` | 2.10 | ParamArray combined with Optional |
 | [`VBA134`](VBA134.md) | 🔴 error | `signature` | 2.10 | ParamArray element type is not Variant |
 | [`VBA136`](VBA136.md) | 🔴 error | `signature` | 2.10 | Array parameter passed ByVal |
+| [`VBA170`](VBA170.md) | 🔴 error | `control_flow` | 2.11 | Exit For not within For...Next |
+| [`VBA171`](VBA171.md) | 🔴 error | `control_flow` | 2.11 | Exit Do not within Do...Loop |
+| [`VBA172`](VBA172.md) | 🔴 error | `control_flow` | 2.11 | Next control variable mismatch |
+| [`VBA173`](VBA173.md) | 🔴 error | `control_flow` | 2.11 | For control variable already in use |
+| [`VBA174`](VBA174.md) | 🔴 error | `control_flow` | 2.11 | For Each control variable must be Variant or object |
+| [`VBA175`](VBA175.md) | 🔴 error | `control_flow` | 2.11 | Duplicate label |
 | [`VBA201`](VBA201.md) | 🔴 error | `jump` | 2.1 | Jump target is not a label |
 | [`VBA210`](VBA210.md) | 🔴 error | `assignment` | 2.2 | `Set` used on a scalar target |
 | [`VBA211`](VBA211.md) | 🔴 error | `assignment` | 2.2 | Object assignment without `Set` |
@@ -62,4 +68,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*57 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*63 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

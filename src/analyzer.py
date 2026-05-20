@@ -60,7 +60,9 @@ class Analyzer:
         self._current_labels = None
         self._current_proc_name = None
         self._current_def_type_map = {}
-        
+        self._loop_stack = []
+        self._for_var_stack = []
+
         # Load Standard/Config Globals into Global Scope
         for name, defn in self.config.object_model.get("globals", {}).items():
             # Use 'returns' as type if available, otherwise 'type'
@@ -593,12 +595,65 @@ class Analyzer:
         self._current_proc_name = proc.name
         self._current_def_type_map = getattr(mod, "def_type_map", {}) or {}
 
+        # Phase 2.11 — VBA175: duplicate label declarations in the procedure.
+        self._validate_duplicate_labels(proc, mod.filename)
+
+        # Phase 2.11 — loop context for Exit For / Exit Do (VBA170/171) and
+        # For-counter checks (VBA172/173). Reset per procedure.
+        self._loop_stack = []
+        self._for_var_stack = []
+
         try:
             self.analyze_block(proc.body, proc_scope, mod.filename, proc.name, with_stack=[])
         finally:
             self._current_labels = None
             self._current_proc_name = None
             self._current_def_type_map = {}
+            self._loop_stack = []
+            self._for_var_stack = []
+
+    def _validate_duplicate_labels(self, proc, filename):
+        """VBA175 — the same line label declared twice in one procedure."""
+        seen = {}
+        ordered = []
+        self._collect_labels_ordered(proc.body, ordered)
+        for tok in ordered:
+            key = tok.value.lower()
+            if key in seen:
+                self.errors.append({
+                    "file": filename,
+                    "line": tok.line,
+                    "rule_id": "VBA175",
+                    "severity": "error",
+                    "message": (
+                        f"Duplicate label '{tok.value}' in '{proc.name}'. "
+                        f"A label may be declared only once per procedure."
+                    ),
+                })
+            else:
+                seen[key] = tok
+
+    def _collect_labels_ordered(self, nodes, out):
+        """Like `_collect_labels` but preserves order and keeps the token
+        (not just the lowercased name) so duplicates can be reported."""
+        from .parser import IfNode, WithNode, ForNode, DoNode, SelectNode, StatementNode
+        for node in nodes:
+            if isinstance(node, StatementNode):
+                if self.is_label(node.tokens):
+                    out.append(node.tokens[0])
+            elif isinstance(node, IfNode):
+                self._collect_labels_ordered(node.true_block, out)
+                for _cond, blk in node.else_blocks:
+                    self._collect_labels_ordered(blk, out)
+                if node.else_block:
+                    self._collect_labels_ordered(node.else_block, out)
+            elif isinstance(node, WithNode):
+                self._collect_labels_ordered(node.body, out)
+            elif isinstance(node, (ForNode, DoNode)):
+                self._collect_labels_ordered(node.body, out)
+            elif isinstance(node, SelectNode):
+                for case in node.cases:
+                    self._collect_labels_ordered(case.body, out)
 
     def _validate_jump_target(self, tokens, filename, context):
         """Validate `GoTo`, `On Error GoTo`, `Resume`, `GoSub` against the
@@ -996,6 +1051,24 @@ class Analyzer:
                 if node.tokens and node.tokens[0].value.lower() == 'exit':
                     if len(node.tokens) > 1:
                         exit_kind = node.tokens[1].value.lower()
+                        # VBA170/171 — `Exit For` / `Exit Do` only valid inside
+                        # the matching loop kind.
+                        if exit_kind == 'for' and 'for' not in getattr(self, '_loop_stack', []):
+                            self.errors.append({
+                                "file": filename,
+                                "line": node.tokens[0].line,
+                                "rule_id": "VBA170",
+                                "severity": "error",
+                                "message": f"Exit For is not within a For...Next loop in '{context}'.",
+                            })
+                        elif exit_kind == 'do' and 'do' not in getattr(self, '_loop_stack', []):
+                            self.errors.append({
+                                "file": filename,
+                                "line": node.tokens[0].line,
+                                "rule_id": "VBA171",
+                                "severity": "error",
+                                "message": f"Exit Do is not within a Do...Loop in '{context}'.",
+                            })
                         if exit_kind in ('sub', 'function', 'property'):
                             # Verify against context
                             # Resolve context in parent scope
@@ -1070,7 +1143,64 @@ class Analyzer:
                 # and recursively walk the body.
                 if node.header_tokens:
                     self.analyze_statement(node.header_tokens, scope, filename, context, with_stack)
+
+                var_name = node.var_token.value if node.var_token else None
+                var_key = var_name.lower() if var_name else None
+
+                # VBA173 — the same control variable is already driving an
+                # enclosing For loop in this procedure.
+                if var_key and var_key in getattr(self, '_for_var_stack', []):
+                    self.errors.append({
+                        "file": filename,
+                        "line": getattr(node, 'line', 0) or (node.var_token.line if node.var_token else 0),
+                        "rule_id": "VBA173",
+                        "severity": "error",
+                        "message": (
+                            f"For loop control variable '{var_name}' is already in "
+                            f"use by an enclosing loop in '{context}'."
+                        ),
+                    })
+
+                # VBA174 — `For Each` control variable must be Variant or an
+                # object type; primitive scalar counters are illegal.
+                if node.kind == 'each' and var_name:
+                    sym = scope.resolve(var_name)
+                    vtype = sym.get('type') if sym else None
+                    if vtype and self._is_clearly_scalar(vtype):
+                        self.errors.append({
+                            "file": filename,
+                            "line": node.var_token.line,
+                            "rule_id": "VBA174",
+                            "severity": "error",
+                            "message": (
+                                f"For Each control variable '{var_name}' is typed "
+                                f"'{vtype}'; it must be Variant or an object type."
+                            ),
+                        })
+
+                # VBA172 — closing `Next x` names a variable other than this
+                # loop's counter (skip the multi-close `Next j, i` form).
+                if (node.kind == 'counter' and var_key and node.next_var_token
+                        and not node.next_multi
+                        and node.next_var_token.value.lower() != var_key):
+                    self.errors.append({
+                        "file": filename,
+                        "line": node.next_var_token.line,
+                        "rule_id": "VBA172",
+                        "severity": "error",
+                        "message": (
+                            f"Next control variable '{node.next_var_token.value}' does "
+                            f"not match the For counter '{var_name}' in '{context}'."
+                        ),
+                    })
+
+                self._loop_stack.append('for')
+                if var_key:
+                    self._for_var_stack.append(var_key)
                 self.analyze_block(node.body, scope, filename, context, with_stack)
+                if var_key:
+                    self._for_var_stack.pop()
+                self._loop_stack.pop()
 
             elif isinstance(node, DoNode):
                 # Do [While|Until cond] / Do … Loop While|Until / While … Wend
@@ -1082,7 +1212,13 @@ class Analyzer:
                 pos = getattr(node, 'condition_position', 'top')
                 if pos == 'top' and node.condition_tokens:
                     self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
+                # `Exit Do` is only valid inside a real Do...Loop, not While...Wend.
+                pushed_do = getattr(node, 'kind', 'do') == 'do'
+                if pushed_do:
+                    self._loop_stack.append('do')
                 self.analyze_block(node.body, scope, filename, context, with_stack)
+                if pushed_do:
+                    self._loop_stack.pop()
                 if pos == 'bottom' and node.condition_tokens:
                     self.analyze_statement(node.condition_tokens, scope, filename, context, with_stack)
 

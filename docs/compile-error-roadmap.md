@@ -18,12 +18,12 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
 | 5  | Prozedur-/Property-Konsistenz | VBA150–VBA154 | ⬜ geplant |
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
-| 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ⬜ geplant |
+| 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
 | 8  | Statement-Platzierung / Def / Option | VBA180–VBA185 | ⬜ geplant |
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ⬜ geplant |
 | 10 | Lexer-Ergänzungen | VBA_LEX003–006 | ⬜ geplant |
 
-Regeln gesamt: **41 → 57** (nach Welle 3).
+Regeln gesamt: **41 → 63** (nach Welle 7).
 
 ---
 
@@ -98,6 +98,32 @@ kein eindeutiger Compile-Fehler → hohes FP-Risiko, bewusst nicht implementiert
 **Tests:** `tests/test_phase210_param_lists.py` (je Regel + „well-formed bleibt
 sauber"), Fixtures in `tests/samples/compile_errors/param_list/`. FP-Wächter
 grün.
+
+---
+
+## Welle 7 — Schleifen-/Label-Kontext ✅
+
+Abgeschlossen. Loop-Kontext-Stacks (`self._loop_stack`, `self._for_var_stack`)
+werden pro Prozedur in `analyze_procedure` zurückgesetzt und in `analyze_block`
+beim Betreten von `ForNode`/`DoNode` gepusht/gepoppt. `parse_for` erfasst jetzt
+die Variable des schließenden `Next` (inkl. `Next j, i`-Mehrfachschließung).
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA170 | Exit For not within For...Next | `Exit For` außerhalb einer For-Schleife |
+| VBA171 | Exit Do not within Do...Loop | `Exit Do` außerhalb `Do` (auch in `While...Wend`) |
+| VBA172 | Next control variable mismatch | `Next j` ≠ For-Zähler (außer `Next j, i`) |
+| VBA173 | For control variable already in use | verschachtelte For mit gleichem Zähler |
+| VBA174 | For Each control variable must be Variant/object | `For Each i` mit `i As Long` o. ä. |
+| VBA175 | Duplicate label | Label zweimal in derselben Prozedur |
+
+**Bekannte Einschränkung:** Die `Next j, i`-Mehrfachschließung wird vom Parser
+nur am innersten Loop verarbeitet; die äußere Schleife kann dadurch ein
+fehlerhaftes VBA110 erzeugen (selten in der Praxis, im Test-Korpus nicht
+vorhanden). VBA172 ist daher bewusst auf die Einzel-`Next`-Form beschränkt.
+
+**Tests:** `tests/test_phase211_loop_label.py` (12 Fälle inkl. Gegenbeispiele),
+Fixtures in `tests/samples/compile_errors/loop_label/`. FP-Wächter grün.
 
 ---
 

@@ -101,12 +101,18 @@ class IfNode(Node):
 
 class ForNode(Node):
     """For i = a To b [Step c]    OR    For Each x In coll"""
-    def __init__(self, kind, var_token, header_tokens, body, line=0):
+    def __init__(self, kind, var_token, header_tokens, body, line=0,
+                 next_var_token=None, next_multi=False):
         self.kind = kind            # 'counter' | 'each'
         self.var_token = var_token  # Token for the loop variable name (may be None)
         self.header_tokens = header_tokens
         self.body = body
         self.line = line
+        # Optional control variable on the closing `Next i` (None for bare
+        # `Next`). `next_multi` flags the `Next j, i` multi-close form, where
+        # the variable need not match this loop's counter.
+        self.next_var_token = next_var_token
+        self.next_multi = next_multi
 
 
 class DoNode(Node):
@@ -994,12 +1000,18 @@ class VBAParser:
 
         body = self.parse_block(end_markers=["Next"])
 
+        next_var_token = None
+        next_multi = False
         if not self.consume('IDENTIFIER', 'Next'):
             self._record_syntax_error(
                 "Compile error: For without Next", line=line, rule_id="VBA110")
         elif self.current_token.type == 'IDENTIFIER':
             # Optional variable name after Next (`Next i`).
+            next_var_token = self.current_token
             self.advance()
+            if self.match('OPERATOR', ','):
+                # `Next j, i` closes several nested loops on one line.
+                next_multi = True
         self.consume_statement()
 
         return ForNode(
@@ -1008,6 +1020,8 @@ class VBAParser:
             header_tokens=header_tokens,
             body=body,
             line=line,
+            next_var_token=next_var_token,
+            next_multi=next_multi,
         )
 
     def parse_do(self):
