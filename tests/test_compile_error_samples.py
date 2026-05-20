@@ -24,6 +24,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "block_terminator": ("without", "expected end"),
     "param_list": ("paramarray", "parameter", "optional", "byref"),
     "loop_label": ("exit for", "exit do", "next control", "already in use", "for each", "duplicate label"),
+    "placement_def_option": ("invalid inside", "deftype", "duplicate option", "duplicate definition"),
     "redim_target": ("redim", "undefined"),
     "erase_target": ("erase",),
     "jump_target": ("not a label", "label"),

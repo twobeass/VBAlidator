@@ -967,6 +967,74 @@ _RULES: list[Rule] = [
         ),
         fix_hint="Move the statement into a procedure body — `Sub Main()` is a common entry point, or wrap it in an `Auto_Open` / `Workbook_Open` event handler.",
     ),
+
+    # -- Phase 3.7 — Type / Enum / Def / Option placement -----------
+    Rule(
+        rule_id="VBA180",
+        title="Statement invalid inside Enum block",
+        severity="error",
+        category="placement",
+        phase="3.7",
+        description=(
+            "An `Enum … End Enum` block may only contain member declarations "
+            "(`Name [= value]`). Executable statements or `Dim`/`Sub`/… "
+            "declarations inside it are illegal."
+        ),
+        fail_example="Enum E\n    A = 1\n    Dim x As Long\nEnd Enum",
+        ok_example="Enum E\n    A = 1\n    B = 2\nEnd Enum",
+        fix_hint="Move the statement outside the Enum; keep only `Name = value` members inside.",
+    ),
+    Rule(
+        rule_id="VBA181",
+        title="Statement invalid inside Type block",
+        severity="error",
+        category="placement",
+        phase="3.7",
+        description=(
+            "A `Type … End Type` block may only contain field declarations "
+            "(`Name [(dims)] As Type`). Executable statements or "
+            "`Dim`/`Sub`/… declarations inside it are illegal."
+        ),
+        fail_example="Type T\n    x As Long\n    Sub Foo()\nEnd Type",
+        ok_example="Type T\n    x As Long\n    y As String\nEnd Type",
+        fix_hint="Move the statement outside the Type; keep only `Name As Type` fields inside.",
+    ),
+    Rule(
+        rule_id="VBA182",
+        title="Deftype statement must precede declarations",
+        severity="error",
+        category="placement",
+        phase="3.7",
+        description=(
+            "`DefInt`/`DefStr`/… statements must appear before any variable, "
+            "constant, type or procedure declaration in the module."
+        ),
+        fail_example="Dim x As Long\nDefInt A-Z",
+        ok_example="DefInt A-Z\nDim x As Long",
+        fix_hint="Move the `DefXxx` statement to the top of the module, after `Option` but before any declaration.",
+    ),
+    Rule(
+        rule_id="VBA183",
+        title="Duplicate Deftype letter range",
+        severity="error",
+        category="placement",
+        phase="3.7",
+        description="A letter cannot be covered by more than one `DefXxx` statement.",
+        fail_example="DefInt A-K\nDefStr H-Z",
+        ok_example="DefInt A-G\nDefStr H-Z",
+        fix_hint="Make the `DefXxx` letter ranges disjoint.",
+    ),
+    Rule(
+        rule_id="VBA184",
+        title="Duplicate Option statement",
+        severity="error",
+        category="placement",
+        phase="3.7",
+        description="The same `Option` statement (Explicit/Compare/Base/Private Module) appears twice.",
+        fail_example="Option Explicit\nOption Explicit",
+        ok_example="Option Explicit",
+        fix_hint="Remove the duplicate `Option` statement.",
+    ),
 ]
 
 

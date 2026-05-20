@@ -19,11 +19,11 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 5  | Prozedur-/Property-Konsistenz | VBA150–VBA154 | ⬜ geplant |
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160–VBA166 | ⬜ geplant |
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
-| 8  | Statement-Platzierung / Def / Option | VBA180–VBA185 | ⬜ geplant |
+| 8  | Statement-Platzierung / Def / Option | VBA180–VBA184 (VBA185 zurückgestellt) | ✅ fertig |
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ⬜ geplant |
 | 10 | Lexer-Ergänzungen | VBA_LEX003–006 | ⬜ geplant |
 
-Regeln gesamt: **41 → 63** (nach Welle 7).
+Regeln gesamt: **41 → 68** (nach Welle 8).
 
 ---
 
@@ -124,6 +124,33 @@ vorhanden). VBA172 ist daher bewusst auf die Einzel-`Next`-Form beschränkt.
 
 **Tests:** `tests/test_phase211_loop_label.py` (12 Fälle inkl. Gegenbeispiele),
 Fixtures in `tests/samples/compile_errors/loop_label/`. FP-Wächter grün.
+
+---
+
+## Welle 8 — Statement-Platzierung / Def / Option ✅
+
+Abgeschlossen (parser-seitig).
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA180 | Statement invalid inside Enum block | fehlplatziertes Statement in `Enum` |
+| VBA181 | Statement invalid inside Type block | fehlplatziertes Statement in `Type` |
+| VBA182 | Deftype must precede declarations | `DefXxx` nach erster Deklaration |
+| VBA183 | Duplicate Deftype letter range | überlappende `DefXxx`-Buchstabenbereiche |
+| VBA184 | Duplicate Option statement | dieselbe `Option`-Anweisung doppelt |
+
+**Wichtige FP-Korrektur (VBA180/181):** VBA erlaubt viele Keywords als
+Feldnamen (`Type As Long`, `Name As String`, …). Die ursprüngliche
+Keyword-Blacklist erzeugte 38 Falsch-Positive in stdVBA. Ersetzt durch einen
+**Shape-Test**: eine Zeile, die mit zwei aufeinanderfolgenden Identifiern
+beginnt und deren zweiter nicht `As` ist (z. B. `Dim x …`, `Sub Foo`), kann
+keine Member-Deklaration sein → fehlplatziertes Statement. FP-Wächter grün.
+
+**VBA185 (Must be first statement on the line) zurückgestellt:** kontext- und
+formatabhängig, hohes FP-Risiko.
+
+**Tests:** `tests/test_phase37_placement_def_option.py` (je Regel +
+Gegenbeispiele), Fixtures in `tests/samples/compile_errors/placement_def_option/`.
 
 ---
 

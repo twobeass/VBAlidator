@@ -221,7 +221,11 @@ class VBAParser:
 
     def parse_module(self):
         module = ModuleNode("Unknown")
-        
+        # VBA182 — DefXxx statements must precede every variable / constant /
+        # procedure / type declaration. Flips once the first such declaration
+        # is parsed at module scope.
+        self._module_decl_seen = False
+
         while self.current_token.type != 'EOF':
             if self.match('IDENTIFIER', 'Attribute'):
                 self.parse_attribute(module)
@@ -245,12 +249,16 @@ class VBAParser:
             ):
                 self._parse_def_type(module)
             elif self.match('IDENTIFIER', 'Public') or self.match('IDENTIFIER', 'Private') or self.match('IDENTIFIER', 'Friend') or self.match('IDENTIFIER', 'Dim') or self.match('IDENTIFIER', 'Const') or self.match('IDENTIFIER', 'Global'):
+                self._module_decl_seen = True
                 self.parse_declaration(module)
             elif self.match('IDENTIFIER', 'Sub') or self.match('IDENTIFIER', 'Function') or self.match('IDENTIFIER', 'Property'):
-                self.procedures_parse(module, 'Public') 
+                self._module_decl_seen = True
+                self.procedures_parse(module, 'Public')
             elif self.match('IDENTIFIER', 'Type'):
+                self._module_decl_seen = True
                 self.parse_udt(module)
             elif self.match('IDENTIFIER', 'Event'):
+                self._module_decl_seen = True
                 # Handle implicit public Event
                 self.consume() # Event
                 event_name = "Unknown"
@@ -265,6 +273,7 @@ class VBAParser:
                 module.procedures.append(proc)
 
             elif self.match('IDENTIFIER', 'Enum'):
+                self._module_decl_seen = True
                 self.parse_enum(module, 'Public')
             elif self.match('NEWLINE'):
                 self.advance()
@@ -338,6 +347,23 @@ class VBAParser:
             ),
         })
 
+    def _is_misplaced_statement_in_typelike(self):
+        """Heuristic for VBA180/VBA181 — detect a statement wrongly placed
+        inside a `Type`/`Enum` block.
+
+        A valid member is `Name As Type`, `Name(dims) As …`, `Name = value`
+        (Enum) or a bare `Name`. VBA is permissive about member names — many
+        keywords (`Type`, `Name`, `Date`, …) are legal field names — so we do
+        NOT match on a keyword blacklist. Instead we use the declaration
+        *shape*: a line that starts with two consecutive identifiers where the
+        second is not `As` (e.g. `Dim x …`, `Sub Foo`, `Static y`, `Set a`)
+        cannot be a member declaration and is therefore a misplaced statement.
+        """
+        if self.current_token.type != 'IDENTIFIER':
+            return False
+        nxt = self.peek()
+        return nxt.type == 'IDENTIFIER' and nxt.value.lower() != 'as'
+
     _DEFTYPE_TO_TYPE = {
         'defbool': 'Boolean', 'defbyte': 'Byte', 'defint': 'Integer',
         'deflng': 'Long', 'deflnglng': 'LongLong', 'deflngptr': 'LongPtr',
@@ -348,10 +374,18 @@ class VBAParser:
 
     def _parse_def_type(self, module):
         """Parse `DefInt A-K, X` etc. and update module.def_type_map."""
+        def_line = self.current_token.line
         keyword = self.current_token.value.lower()
         target_type = self._DEFTYPE_TO_TYPE.get(keyword, 'Variant')
         self.advance()  # consume DefXxx
 
+        # VBA182 — DefXxx must precede all declarations.
+        if getattr(self, '_module_decl_seen', False):
+            self._record_syntax_error(
+                "Compile error: Deftype statements must precede declarations",
+                line=def_line, rule_id="VBA182")
+
+        dup_reported = False
         while self.current_token.type not in ('NEWLINE', 'EOF'):
             if self.current_token.type == 'IDENTIFIER' and len(self.current_token.value) >= 1:
                 first = self.current_token.value[0].lower()
@@ -367,7 +401,15 @@ class VBAParser:
                     lo = min(ord(first), ord(last))
                     hi = max(ord(first), ord(last))
                     for code in range(lo, hi + 1):
-                        module.def_type_map[chr(code)] = target_type
+                        letter = chr(code)
+                        # VBA183 — a letter already covered by a previous
+                        # DefXxx statement is a duplicate definition.
+                        if letter in module.def_type_map and not dup_reported:
+                            self._record_syntax_error(
+                                "Compile error: Duplicate definition (Deftype letter range overlaps)",
+                                line=def_line, rule_id="VBA183")
+                            dup_reported = True
+                        module.def_type_map[letter] = target_type
             elif self.match('OPERATOR', ','):
                 self.advance()
             else:
@@ -376,12 +418,24 @@ class VBAParser:
 
     def _parse_option(self, module):
         """Parse `Option Explicit | Compare {Binary|Text|Database} | Base N | Private Module`."""
+        opt_line = self.current_token.line
         self.advance()  # consume 'Option'
         if self.current_token.type != 'IDENTIFIER':
             self.consume_statement()
             return
         kind = self.current_token.value.lower()
         self.advance()
+        # VBA184 — the same Option statement must not appear twice.
+        already = (
+            (kind == 'explicit' and module.options.get('explicit'))
+            or (kind == 'compare' and module.options.get('compare') is not None)
+            or (kind == 'base' and getattr(module, '_option_base_seen', False))
+            or (kind == 'private' and module.options.get('private_module'))
+        )
+        if already:
+            self._record_syntax_error(
+                f"Compile error: Duplicate Option statement (Option {kind.capitalize()})",
+                line=opt_line, rule_id="VBA184")
         if kind == 'explicit':
             module.options['explicit'] = True
         elif kind == 'compare':
@@ -389,6 +443,7 @@ class VBAParser:
                 module.options['compare'] = self.current_token.value.lower()
                 self.advance()
         elif kind == 'base':
+            module._option_base_seen = True
             if self.current_token.type == 'INTEGER':
                 try:
                     module.options['base'] = int(self.current_token.value)
@@ -1411,7 +1466,15 @@ class VBAParser:
                 self.advance() # Type
                 self.consume_statement()
                 break
-            
+
+            # VBA181 — a statement wrongly placed inside a Type block.
+            if self._is_misplaced_statement_in_typelike():
+                self._record_syntax_error(
+                    "Compile error: Statement invalid inside Type block",
+                    line=self.current_token.line, rule_id="VBA181")
+                self.consume_statement()
+                continue
+
             # Parse Member: Name [(dims)] As Type [* length]
             if self.current_token.type == 'IDENTIFIER':
                 var_name = self.current_token.value
@@ -1464,6 +1527,14 @@ class VBAParser:
                 self.advance()
                 self.consume_statement()
                 break
+
+            # VBA180 — a statement wrongly placed inside an Enum block.
+            if self._is_misplaced_statement_in_typelike():
+                self._record_syntax_error(
+                    "Compile error: Statement invalid inside Enum block",
+                    line=self.current_token.line, rule_id="VBA180")
+                self.consume_statement()
+                continue
 
             # Member: Name = Value
             if self.current_token.type == 'IDENTIFIER':

@@ -42,6 +42,11 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA173`](VBA173.md) | 🔴 error | `control_flow` | 2.11 | For control variable already in use |
 | [`VBA174`](VBA174.md) | 🔴 error | `control_flow` | 2.11 | For Each control variable must be Variant or object |
 | [`VBA175`](VBA175.md) | 🔴 error | `control_flow` | 2.11 | Duplicate label |
+| [`VBA180`](VBA180.md) | 🔴 error | `placement` | 3.7 | Statement invalid inside Enum block |
+| [`VBA181`](VBA181.md) | 🔴 error | `placement` | 3.7 | Statement invalid inside Type block |
+| [`VBA182`](VBA182.md) | 🔴 error | `placement` | 3.7 | Deftype statement must precede declarations |
+| [`VBA183`](VBA183.md) | 🔴 error | `placement` | 3.7 | Duplicate Deftype letter range |
+| [`VBA184`](VBA184.md) | 🔴 error | `placement` | 3.7 | Duplicate Option statement |
 | [`VBA201`](VBA201.md) | 🔴 error | `jump` | 2.1 | Jump target is not a label |
 | [`VBA210`](VBA210.md) | 🔴 error | `assignment` | 2.2 | `Set` used on a scalar target |
 | [`VBA211`](VBA211.md) | 🔴 error | `assignment` | 2.2 | Object assignment without `Set` |
@@ -68,4 +73,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*63 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*68 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
