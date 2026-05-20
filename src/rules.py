@@ -603,6 +603,41 @@ _RULES: list[Rule] = [
         fix_hint="Declare the label or fix the spelling. Special forms `On Error GoTo 0`, `On Error GoTo -1`, and `On Error Resume Next` do not need a target.",
     ),
 
+    # -- Phase 2.9: named arguments at call sites -------------------
+    Rule(
+        rule_id="VBA140",
+        title="Named argument not found",
+        severity="error",
+        category="signature",
+        phase="2.9",
+        description="A `name:=value` call argument names a parameter the target procedure does not declare.",
+        fail_example="Sub S(ByVal a As Long)\nEnd Sub\nSub T()\n    Call S(b:=1)\nEnd Sub",
+        ok_example="Sub S(ByVal a As Long)\nEnd Sub\nSub T()\n    Call S(a:=1)\nEnd Sub",
+        fix_hint="Use a parameter name that exists in the procedure signature.",
+    ),
+    Rule(
+        rule_id="VBA141",
+        title="Named argument specified more than once",
+        severity="error",
+        category="signature",
+        phase="2.9",
+        description="The same named argument appears twice in one call.",
+        fail_example="Call S(a:=1, a:=2)",
+        ok_example="Call S(a:=1, b:=2)",
+        fix_hint="Pass each named argument at most once.",
+    ),
+    Rule(
+        rule_id="VBA142",
+        title="Named arguments with ParamArray",
+        severity="error",
+        category="signature",
+        phase="2.9",
+        description="A procedure declaring a `ParamArray` cannot be called using named arguments.",
+        fail_example="Sub S(ParamArray a() As Variant)\nEnd Sub\nSub T()\n    Call S(a:=1)\nEnd Sub",
+        ok_example="Sub S(ParamArray a() As Variant)\nEnd Sub\nSub T()\n    Call S(1, 2, 3)\nEnd Sub",
+        fix_hint="Pass arguments positionally when the procedure has a ParamArray.",
+    ),
+
     # -- Phase 2.12: procedure / property consistency ---------------
     Rule(
         rule_id="VBA150",

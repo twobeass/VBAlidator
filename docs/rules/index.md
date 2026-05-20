@@ -39,6 +39,9 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA133`](VBA133.md) | 🔴 error | `signature` | 2.10 | ParamArray combined with Optional |
 | [`VBA134`](VBA134.md) | 🔴 error | `signature` | 2.10 | ParamArray element type is not Variant |
 | [`VBA136`](VBA136.md) | 🔴 error | `signature` | 2.10 | Array parameter passed ByVal |
+| [`VBA140`](VBA140.md) | 🔴 error | `signature` | 2.9 | Named argument not found |
+| [`VBA141`](VBA141.md) | 🔴 error | `signature` | 2.9 | Named argument specified more than once |
+| [`VBA142`](VBA142.md) | 🔴 error | `signature` | 2.9 | Named arguments with ParamArray |
 | [`VBA150`](VBA150.md) | 🔴 error | `declaration` | 2.12 | Ambiguous name detected (duplicate procedure) |
 | [`VBA152`](VBA152.md) | 🔴 error | `property` | 2.12 | Property Get/Let type inconsistent |
 | [`VBA153`](VBA153.md) | 🔴 error | `interface` | 2.12 | Implements method signature mismatch |
@@ -88,4 +91,4 @@ Stable rule IDs emitted by VBAlidator. Each row links to the rule's detail page.
 | [`VBA_RT001`](VBA_RT001.md) | 🔴 compile_verified | `roundtrip` | 4.5 | VBE round-trip compile error |
 | [`VBA_RT002`](VBA_RT002.md) | 🟡 warning | `roundtrip` | 4.5 | Round-trip verification inconclusive |
 
-*83 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.
+*86 rules registered.* Generated from `src/rules.py` via `python tools/generate_rule_docs.py`.

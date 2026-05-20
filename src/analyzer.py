@@ -2430,6 +2430,63 @@ class Analyzer:
              args.append(current_arg)
         return args
 
+    @staticmethod
+    def _param_name(p):
+        if isinstance(p, dict):
+            return (p.get('name') or '').lower() or None
+        return (getattr(p, 'name', '') or '').lower() or None
+
+    @staticmethod
+    def _param_is_paramarray(p):
+        if isinstance(p, dict):
+            return bool(p.get('is_paramarray', False))
+        return bool(getattr(p, 'is_paramarray', False))
+
+    def _validate_named_args(self, args, param_defs, name, filename, line, context):
+        """VBA140/141/142 — validate `name:=value` call arguments.
+
+        - VBA141 (duplicate) is purely syntactic.
+        - VBA140 (unknown name) only fires when the target's parameter names
+          are reliably known (a scanned-source procedure), to avoid false
+          positives against under-modelled host APIs.
+        - VBA142 — a procedure with a ParamArray cannot be called with named
+          arguments.
+        """
+        param_names = {self._param_name(p) for p in (param_defs or [])}
+        param_names.discard(None)
+        has_param_array = any(self._param_is_paramarray(p) for p in (param_defs or []))
+
+        seen = set()
+        any_named = False
+        for arg in args:
+            if (len(arg) >= 2 and arg[0].type == 'IDENTIFIER'
+                    and arg[1].type == 'OPERATOR' and arg[1].value == ':='):
+                any_named = True
+                nm = arg[0].value
+                low = nm.lower()
+                if low in seen:
+                    self.errors.append({
+                        "file": filename, "line": line,
+                        "rule_id": "VBA141", "severity": "error",
+                        "message": f"Named argument '{nm}' specified more than once in call to '{name}'.",
+                    })
+                seen.add(low)
+                if param_names and low not in param_names:
+                    self.errors.append({
+                        "file": filename, "line": line,
+                        "rule_id": "VBA140", "severity": "error",
+                        "message": f"Named argument '{nm}' not found in '{name}'.",
+                    })
+
+        if any_named and has_param_array:
+            self.errors.append({
+                "file": filename, "line": line,
+                "rule_id": "VBA142", "severity": "error",
+                "message": (
+                    f"'{name}' has a ParamArray and cannot be called with named arguments."
+                ),
+            })
+
     def validate_signature(self, name, symbol, arg_tokens, filename, line, context, scope=None, with_stack=None):
         extra = symbol.get('extra')
         if not extra: return
@@ -2471,6 +2528,9 @@ class Analyzer:
              max_args = extra.get('max_args', 999)
              if 'args' in extra:
                  param_defs = extra['args']
+
+        # Phase 2.9 — named-argument validation (VBA140/141/142)
+        self._validate_named_args(args, param_defs, name, filename, line, context)
 
         if arg_count < min_args:
              self.errors.append({

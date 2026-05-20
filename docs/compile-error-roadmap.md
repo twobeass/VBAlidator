@@ -15,7 +15,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 1  | Block-Terminator-Paarung | VBA110–VBA119 | ✅ fertig |
 | 2  | Deklarations-Typauflösung | VBA120,122,123 (VBA121 zurückgestellt) | ✅ fertig |
 | 3  | Argumentlisten-Wohlgeformtheit | VBA130–VBA136 | ✅ fertig |
-| 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ⬜ geplant |
+| 4  | Benannte Argumente an Aufrufstellen | VBA140–VBA142 | ✅ fertig |
 | 5  | Prozedur-/Property-Konsistenz | VBA150,152,153 (151/154 zurückgestellt) | ✅ fertig |
 | 6  | Zuweisungs-/Ausdrucks-Semantik | VBA160,164,165 (161/162/163/166 zurückgestellt) | ✅ fertig |
 | 7  | Schleifen-/Label-Kontext | VBA170–VBA175 | ✅ fertig |
@@ -23,7 +23,7 @@ gefiltert auf statisch aus dem Quelltext erkennbare Compile-Fehler.
 | 9  | Bedingte Kompilierung (`#If`) | VBA190–VBA192 | ✅ fertig |
 | 10 | Lexer-Ergänzungen | VBA_LEX004–006 (VBA_LEX003 zurückgestellt) | ✅ fertig |
 
-Regeln gesamt: **41 → 83** (nach Welle 6).
+Regeln gesamt: **41 → 86** (nach Welle 4 — alle Wellen abgeschlossen).
 
 ---
 
@@ -272,10 +272,42 @@ hohes FP-Risiko.
 
 ---
 
-## Nächste Schritte
+## Welle 4 — Benannte Argumente an Aufrufstellen ✅
 
-**Welle 2 (Deklarations-Typauflösung, VBA120–VBA123)** ist der nächste
-höchste Hebel: `User-defined type not defined`, Forward-Reference, leere
-`Type`/`Enum`. Höheres Falsch-Positiv-Risiko → neuer Validator
-`_validate_declared_types(mod)` nur aktiv bei geladenem Host-/Std-Modell.
-Details siehe Analyse-Doku, Teil 2.
+Abgeschlossen. Neuer Helfer `_validate_named_args`, aufgerufen aus
+`validate_signature` (greift für geklammerte Aufrufe auflösbarer Prozeduren).
+
+| ID | Meldung | Auslöser |
+|----|---------|----------|
+| VBA140 | Named argument not found | `name:=` ohne passenden Parameter (nur bei zuverlässig bekannten Quell-Signaturen) |
+| VBA141 | Named argument specified more than once | doppeltes `name:=` im selben Aufruf (rein syntaktisch) |
+| VBA142 | Named arguments with ParamArray | benannte Argumente bei `ParamArray`-Prozedur |
+
+**FP-Schutz:** VBA140 feuert nur, wenn die Parameternamen verlässlich bekannt
+sind (gescannte Quell-Prozedur); gegen untermodellierte Host-APIs wird nicht
+gemeldet. VBA141 ist rein syntaktisch.
+
+**Bekannte Einschränkung:** validiert wird nur die geklammerte Aufrufform
+(`Foo(a:=1)`); die klammerlose Statement-Form (`Foo a:=1`) erreicht
+`validate_signature` nicht und bleibt ungeprüft.
+
+---
+
+## Status: abgeschlossen 🎉
+
+Alle 10 Wellen umgesetzt. **41 → 86 Regeln.** Voll implementiert: Wellen
+1, 3, 4, 7, 8, 9, 10 (vollständig) sowie 2, 5, 6 (Kernregeln). Bewusst
+zurückgestellte Einzelregeln mit Begründung (FP-Risiko bzw. fehlendes
+Ausdruck-Typsystem):
+
+| Regel | Thema | Grund |
+|-------|-------|-------|
+| VBA121 | Forward reference to UDT | Sonderfall-Semantik, geringer Nutzen |
+| VBA135 | Invalid optional parameter type | kontextabhängig |
+| VBA151 | Only comments after End Sub | überlappt VBA361 |
+| VBA154 | Procedure type mismatch (AddressOf) | Signatur-Typsystem nötig |
+| VBA161/162/163/166 | Array-/Dimensions-/AddressOf-Zuweisung | Ausdruck-Typsystem nötig |
+| VBA185 | Must be first statement on the line | format-/kontextabhängig |
+| VBA_LEX003 | Type-declaration character mismatch | Parser-Kontext, falsche Schicht |
+
+Der `awesome_vba`-Falsch-Positiv-Wächter ist über alle Wellen grün geblieben.
