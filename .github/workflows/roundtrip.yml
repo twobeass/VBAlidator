@@ -29,7 +29,7 @@ jobs:
     # Requires the Office Trust Center "Trust access to the VBA project
     # object model" setting; failures here open an issue automatically.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:

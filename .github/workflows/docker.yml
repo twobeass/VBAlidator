@@ -22,7 +22,7 @@ jobs:
     name: Build & push (multi-arch)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Compute short SHA (matches docker/metadata-action sha-<short> tag)
         id: shortsha
         run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
