@@ -240,6 +240,110 @@ def test_word_host_loads_documents_class(tmp_path):
     )
 
 
+def test_project_host_model_resolves_tasks_and_assignments(tmp_path):
+    """The shape real MS Project VBA is written in: iterate the task list, read
+    a custom field, walk the assignments, name a pj* constant."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim p As Project\n"
+        "    Dim t As Task\n"
+        "    Dim a As Assignment\n"
+        "    Dim r As Resource\n"
+        "    Set p = ActiveProject\n"
+        "    For Each t In p.Tasks\n"
+        "        If Not t Is Nothing Then\n"
+        "            Debug.Print t.UniqueID, t.Name, t.Text1, t.Work\n"
+        "            For Each a In t.Assignments\n"
+        "                Set r = p.Resources(a.ResourceID)\n"
+        "                If r.Type = pjResourceTypeWork Then\n"
+        "                    Debug.Print a.ResourceUniqueID, r.MaxUnits\n"
+        "                End If\n"
+        "            Next a\n"
+        "        End If\n"
+        "    Next t\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="project")
+    assert all(e["rule_id"] not in ("VBA001", "VBA002") for e in result.errors), (
+        f"Project host must resolve ActiveProject, Task, Assignment, Resource, "
+        f"their members and the pj* constants. Errors: {result.errors!r}"
+    )
+
+
+def test_project_host_still_flags_a_member_that_does_not_exist(tmp_path):
+    """The point of a host model is catching the typo, not blessing everything.
+
+    Project.Assignments looks obvious and does not exist - Task and Resource
+    have it, Project does not - so it is the honest test that the model is a
+    whitelist rather than a wildcard.
+    """
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim p As Project\n"
+        "    Set p = ActiveProject\n"
+        "    Debug.Print p.Assignments.Count\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="project")
+    assert any(
+        e["rule_id"] == "VBA002" and "Assignments" in e.get("message", "")
+        for e in result.errors
+    ), (
+        f"Project.Assignments does not exist and must be reported. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_project_host_collection_is_not_its_item(tmp_path):
+    """The project.assignments doc page carries the Assignment object's member
+    tables by mistake, every link pointing at project.assignment.*. A model built
+    from that page would bless Assignments.Work. This is the regression test for
+    reading member files instead."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim t As Task\n"
+        "    Set t = ActiveProject.Tasks(1)\n"
+        "    Debug.Print t.Assignments.Work\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="project")
+    assert any(
+        e["rule_id"] == "VBA002" and "Work" in e.get("message", "")
+        for e in result.errors
+    ), (
+        f"Assignments is a collection of six members and has no Work. "
+        f"Errors: {result.errors!r}"
+    )
+
+
+def test_project_host_named_arguments_resolve(tmp_path):
+    """Project's command surface is called with named arguments in practice, so
+    the model carries per-argument names rather than only counts."""
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Application.OpenUndoTransaction Label:=\"x\"\n"
+        "    Application.CloseUndoTransaction\n"
+        "End Sub\n",
+    )
+    result = precheck(bas, host="project")
+    assert all(
+        e["rule_id"] not in ("VBA001", "VBA002", "VBA006", "VBA140", "VBA141", "VBA142")
+        for e in result.errors
+    ), f"Named arguments on Application methods must resolve. Errors: {result.errors!r}"
+
+
 def test_unknown_host_does_not_crash(tmp_path):
     bas = tmp_path / "M.bas"
     bas.write_text('Attribute VB_Name = "M"\nOption Explicit\nSub S()\nEnd Sub\n')
@@ -641,7 +745,7 @@ End Sub
 
 
 @pytest.mark.parametrize("host", [
-    "excel", "word", "access", "outlook", "visio",
+    "excel", "word", "access", "outlook", "visio", "project",
     "mscomctl", "msforms",
     "scripting", "vbscript_regexp", "wscript_shell", "shell_application",
 ])

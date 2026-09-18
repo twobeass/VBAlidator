@@ -24,3 +24,7 @@ htmlcov/
 # Per-session working notes (Claude Code workspace docs, not source)
 CLAUDE.md
 HANDOVER*.md
+
+# Build inputs for tools/build_project_model.py, written by
+# tools/extract_project_docs.py. The shipped artifact is src/models/project.json.
+tools/data/

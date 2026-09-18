@@ -61,16 +61,19 @@ def main():
     parser.add_argument(
         "--host",
         choices=[
-            "excel", "word", "access", "outlook", "visio",
+            "excel", "word", "access", "outlook", "visio", "project",
             "mscomctl", "msforms",
             "scripting", "vbscript_regexp", "wscript_shell", "shell_application",
         ],
         help="Built-in host model to load (Excel/Word/Access/Outlook/Visio/"
+             "Project/"
              "MSComCtl/MSForms/Scripting/VBScript_RegExp/WScript_Shell/"
              "Shell_Application). Bundled models/<host>.json is layered on "
              "top of the standard model so the user does not need to run "
              "the VBA_Model_Exporter.bas first. Excel/Word/Access/Visio are "
-             "full-fidelity models from real Office type libraries; the "
+             "full-fidelity models from real Office type libraries; Project is "
+             "generated from the published reference in "
+             "MicrosoftDocs/VBA-Docs; the "
              "companion stubs (MSComCtl/MSForms/Scripting/…) cover the "
              "common COM libraries and **auto-layer** whenever any scanned "
              "file mentions their ProgID / namespace (`Scripting.Dictionary`, "
