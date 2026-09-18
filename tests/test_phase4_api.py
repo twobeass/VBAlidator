@@ -240,6 +240,37 @@ def test_word_host_loads_documents_class(tmp_path):
     )
 
 
+def test_std_model_covers_the_vba_language_reference(tmp_path):
+    """std_model is what every host layers on top of, so a name missing from it
+    is a false "undefined identifier" for every user of every host.
+
+    These are all documented VBA intrinsics that were absent: the financial
+    functions, the registry ones, and the system colour / calendar constants.
+    tools/check_std_model_coverage.py is what found them, and re-running it
+    against a VBA-Docs clone now reports nothing missing.
+    """
+    bas = tmp_path / "M.bas"
+    bas.write_text(
+        'Attribute VB_Name = "M"\n'
+        "Option Explicit\n"
+        "Sub S()\n"
+        "    Dim d As Double, s As String\n"
+        "    d = Pmt(0.05 / 12, 360, -200000)\n"
+        "    d = NPV(0.1, Array(-70000, 22000, 25000))\n"
+        "    d = Rate(48, -500, 20000)\n"
+        "    d = SLN(10000, 1000, 10)\n"
+        "    d = DDB(10000, 1000, 10, 1)\n"
+        "    s = GetSetting(\"App\", \"Section\", \"Key\", \"\")\n"
+        "    Debug.Print vbUseDefault, vb3DLight, vbCalGreg\n"
+        "End Sub\n",
+    )
+    result = precheck(bas)
+    assert all(e["rule_id"] != "VBA001" for e in result.errors), (
+        f"Documented VBA intrinsics must resolve without any host model. "
+        f"Errors: {result.errors!r}"
+    )
+
+
 def test_unknown_host_does_not_crash(tmp_path):
     bas = tmp_path / "M.bas"
     bas.write_text('Attribute VB_Name = "M"\nOption Explicit\nSub S()\nEnd Sub\n')

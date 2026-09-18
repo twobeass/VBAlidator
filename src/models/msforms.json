@@ -1,5 +1,20 @@
 {
   "globals": {
+    "UserForms": {
+      "type": "Object"
+    },
+    "Load": {
+      "type": "Function",
+      "returns": "Nothing",
+      "min_args": 1,
+      "max_args": 1
+    },
+    "Unload": {
+      "type": "Function",
+      "returns": "Nothing",
+      "min_args": 1,
+      "max_args": 1
+    },
     "fmActionCopy": {
       "type": "Long",
       "kind": "EnumItem"
